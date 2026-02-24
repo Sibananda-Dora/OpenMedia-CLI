@@ -12,4 +12,4 @@ dependencies = [
 ]
 
 [project.scripts]
-openmedia = "openmedia.cli:main"
+openmedia = "openmedia.cli_frontend:main"
