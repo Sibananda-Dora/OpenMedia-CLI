@@ -2,6 +2,22 @@
 
 > **Translate human intent into high-performance FFmpeg commands using Local Models.**
 
+##  Important: Read Before Use
+
+###  Performance & Encoding Logic
+This CLI is optimized for **NVIDIA GPUs** using the `h264_nvenc` and `hevc_nvenc` encoders. 
+* **If you have an NVIDIA GPU (RTX 3050+):** The AI will prioritize hardware acceleration for near-instant processing.
+* **If you do NOT have an NVIDIA GPU:** The AI will fallback to **Software Encoding** (`libx264` / `libx265`). 
+  * *Note:* Software encoding is significantly more CPU-intensive and will be slower, but it produces higher quality/smaller file sizes.
+
+### Minimum System Requirements
+To run the local **7B AI Model** and **FFmpeg** simultaneously, your system should meet these specs:
+* **OS:** Windows 10/11 or Linux.
+* **CPU:** 4-Core (Intel i5 11th Gen / Ryzen 5 5000 series or better recommended).
+* **RAM:** **16GB Minimum** 
+* **GPU:** NVIDIA RTX 30-series or 40-series (4GB VRAM) for Hardware Acceleration.
+* **Software:** [Ollama](https://ollama.com) must be installed and running.
+
 OpenMedia is an agentic CLI tool that uses a local **Qwen 2.5 Coder 7B** model to turn English requests into optimized, hardware-accelerated video processing commands. It is designed for developers and creators who want the power of FFmpeg without memorizing complex syntax.
 
 ---
