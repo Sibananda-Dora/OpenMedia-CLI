@@ -17,6 +17,6 @@ OpenMedia is an agentic CLI tool that uses a local **Qwen 2.5 Coder 7B** model t
 First, clone the repository and run the automated installer. This script will create a virtual environment, install dependencies, and download the AI model.
 
 ```bash
-git clone [https://github.com/Sibananda-Dora/OpenMedia-Local.git](https://github.com/Sibananda-Dora/OpenMedia-Local.git)
+git clone https://github.com/Sibananda-Dora/OpenMedia-CLI.git
 cd openmedia
 python install.py
