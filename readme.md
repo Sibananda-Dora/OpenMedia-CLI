@@ -34,5 +34,5 @@ First, clone the repository and run the automated installer. This script will cr
 
 ```bash
 git clone https://github.com/Sibananda-Dora/OpenMedia-CLI.git
-cd openmedia
+cd OpenMedia-CLI
 python install.py
