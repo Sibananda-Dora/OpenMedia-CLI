@@ -11,7 +11,7 @@ def run_command(command, description):
         sys.exit(1)
 
 def main():
-    print("--- MediaHandle: First-Time Setup ---")
+    print("--- OpenMedia: First-Time Setup ---")
     
     # 1. Create Virtual Environment
     if not os.path.exists("venv"):
