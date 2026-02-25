@@ -1,5 +1,5 @@
 @echo off
-TITLE MediaHandle Launcher
+TITLE OpenMedia Launcher
 cls
 
 echo [#] Checking system readiness...
@@ -15,7 +15,7 @@ if %errorlevel% neq 0 (
 
 :: 2. Activate venv and Launch
 if exist venv\Scripts\activate (
-    echo [#] Activating environment and launching MediaHandle...
+    echo [#] Activating environment and launching OpenMedia...
     call venv\Scripts\activate
     openmedia
 ) else (
