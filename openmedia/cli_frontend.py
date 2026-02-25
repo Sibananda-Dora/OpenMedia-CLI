@@ -5,12 +5,27 @@ import questionary
 import requests
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
+from questionary import Style
 
 from openmedia.graph import media_agent
 from openmedia.state import AgentState
 from . import executor, utils
 
 console = Console()
+
+# Custom style for questionary to match the new aesthetic
+OM_STYLE = Style([
+    ('qmark', 'fg:#00ffff bold'),
+    ('question', 'bold'),
+    ('answer', 'fg:#00ff00 bold'),
+    ('pointer', 'fg:#00ffff bold'),
+    ('highlighted', 'fg:#00ffff bold'),
+    ('selected', 'fg:#00ff00'),
+    ('separator', 'fg:#666666'),
+    ('instruction', 'fg:#888888 italic'),
+    ('text', 'fg:#ffffff'),
+])
 
 
 def parse_args(argv=None):
@@ -304,22 +319,55 @@ def _collect_user_request(target_file):
             return f"Remove audio from {target_name} while keeping video quality. Save as {output_name}."
 
 
+def _render_welcome(args):
+    dry_run_label = "ON" if args.dry_run else "OFF"
+    ultra_safe_label = "ON" if args.ultra_safe else "OFF"
+    
+    banner = r"""
+[bold cyan]
+  ____  _____  _____ _   _ __  __ _____ ____ ___    _    
+ / __ \|  __ \|  ___| \ | |  \/  | ____|  _ \_ _|  / \   
+| |  | | |__) | |__ |  \| | |\/| |  _| | | | | |  / _ \  
+| |__| |  ___/|  ___| |\  | |  | | |___| |_| | | / ___ \ 
+ \____/|_|    |_____|_| \_|_|  |_|_____|____/___/_/   \_\
+                                                         
+  ____ _     ___ 
+ / ___| |   |_ _|
+| |   | |    | | 
+| |___| |___ | | 
+ \____|_____|___|
+[/]"""
+
+    # Metasploit style stats
+    stats = [
+        f"=[ [bold white]openmedia v1.1.0-stable[/] ]",
+        f"+ -- --=[ [cyan]Model:[/] Qwen2.5-Coder:7B (Local/Ollama) ]",
+        f"+ -- --=[ [cyan]Enablers:[/] FFmpeg, LangGraph, Rich ]",
+        f"+ -- --=[ [cyan]System:[/] dry-run={dry_run_label}, ultra-safe={ultra_safe_label} ]",
+    ]
+    
+    console.print(banner)
+    for line in stats:
+        console.print(line)
+    console.print()
+
+    # Instructions in metasploit style
+    instructions = (
+        "      [bold white]Usage Instructions:[/]\n\n"
+        "      1. Select a media file from the local directory or provide a path.\n"
+        "      2. Choose a transformation task or provide a custom request.\n"
+        "      3. Review the AI-generated FFmpeg command.\n"
+        "      4. Confirm execution to process your media safely.\n\n"
+        "      [dim]Note: Ensure Ollama is running with the required model installed.[/]"
+    )
+    console.print(Panel(instructions, border_style="bright_black", expand=False))
+    console.print()
+
+
 def main(argv=None):
     args = parse_args(argv)
     console.clear()
-    console.print(
-        Panel(
-            "[bold cyan]OpenMedia AI[/]\n"
-            "[italic]Guided Local Media Editor[/]\n\n"
-            "[dim]New here? Use arrow keys + Enter.\n"
-            "1) Pick a file\n"
-            "2) Pick a guided task (or custom)\n"
-            "3) Review and run\n"
-            "Tip: Use --dry-run to preview without rendering.[/]",
-            expand=False,
-            border_style="cyan",
-        )
-    )
+    _render_welcome(args)
 
     if not check_ollama():
         console.print("[bold red]X Ollama is not running. Please start Ollama first.[/]")
@@ -329,10 +377,12 @@ def main(argv=None):
         open_settings_menu()
         return
 
+    console.print(Panel("[bold]Step 1/3: Media Selection[/]", style="on grey23", border_style="bright_black"))
     target_file = _select_target_file()
     if not target_file:
         return
 
+    console.print(Panel("[bold]Step 2/3: Transformation Task[/]", style="on grey23", border_style="bright_black"))
     query = _collect_user_request(target_file)
     if not query:
         return
@@ -342,6 +392,7 @@ def main(argv=None):
             f"[bold]Selected file:[/] {target_file}\n[bold]Requested edit:[/] {query}",
             title="Step 3/3: Review",
             border_style="blue",
+            style="on grey23"
         )
     )
 
