@@ -1,3 +1,5 @@
 rich
 requests
 Questionary
+pydantic
+langgraph
