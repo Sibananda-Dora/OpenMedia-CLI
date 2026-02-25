@@ -1,2 +1,8 @@
 .env
 *.log
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+history.log
+.openmedia_config.json
