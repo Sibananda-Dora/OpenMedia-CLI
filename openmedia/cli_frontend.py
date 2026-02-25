@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import questionary
 import requests
@@ -142,12 +143,179 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
     return llm_runtime_mode, llm_effective_mode
 
 
+def _suggest_output_name(target_file, suffix, new_ext=None):
+    target_path = Path(target_file)
+    ext = new_ext if new_ext else (target_path.suffix if target_path.suffix else ".mp4")
+    return f"{target_path.stem}_{suffix}{ext}"
+
+
+def _ask_output_name(prompt, default_name):
+    output_name = questionary.text(prompt, default=default_name).ask()
+    if not output_name:
+        return default_name
+    return output_name.strip().strip('"')
+
+
+def _select_target_file():
+    while True:
+        local_files = utils.get_local_media_files()
+        choices = []
+        if local_files:
+            choices.extend(local_files)
+        choices.extend(["Type a path manually", "Cancel"])
+
+        choice = questionary.select(
+            "Step 1/3: Choose the media file to edit:",
+            choices=choices,
+        ).ask()
+
+        if not choice or choice == "Cancel":
+            return None
+
+        if choice == "Type a path manually":
+            manual_path = questionary.text("Enter file path:").ask()
+            if not manual_path:
+                return None
+            manual_path = manual_path.strip().strip('"')
+            if not Path(manual_path).exists():
+                console.print(f"[yellow]File not found: {manual_path}[/]")
+                retry = questionary.confirm("Try another path?").ask()
+                if retry:
+                    continue
+                return None
+            return manual_path
+
+        return choice
+
+
+def _collect_user_request(target_file):
+    target_name = Path(target_file).name
+
+    while True:
+        action = questionary.select(
+            "Step 2/3: Choose what you want to do:",
+            choices=[
+                "Compress for sharing (Recommended)",
+                "Change file format",
+                "Extract audio only",
+                "Remove audio from video",
+                "Custom request",
+                "Open settings",
+                "Cancel",
+            ],
+        ).ask()
+
+        if not action or action == "Cancel":
+            return None
+
+        if action == "Open settings":
+            open_settings_menu()
+            continue
+
+        if action == "Custom request":
+            query = questionary.text(
+                "Describe your edit request:",
+                default=f"Optimize {target_name} for sharing while preserving quality.",
+            ).ask()
+            if not query:
+                return None
+            if query.strip().lower() == "/settings":
+                open_settings_menu()
+                continue
+            return query
+
+        if action == "Compress for sharing (Recommended)":
+            quality_choice = questionary.select(
+                "Compression target:",
+                choices=[
+                    "Balanced size and quality (Recommended)",
+                    "Smaller file size",
+                    "Higher quality",
+                ],
+            ).ask()
+            resolution_choice = questionary.select(
+                "Output resolution:",
+                choices=["Keep original (Recommended)", "1080p", "720p"],
+            ).ask()
+            fps_choice = questionary.select(
+                "Frame rate:",
+                choices=["Keep original (Recommended)", "60 fps", "30 fps"],
+            ).ask()
+            output_name = _ask_output_name(
+                "Output filename:",
+                _suggest_output_name(target_file, "share", ".mp4"),
+            )
+
+            quality_instruction = {
+                "Balanced size and quality (Recommended)": "balanced compression",
+                "Smaller file size": "stronger compression for a smaller file",
+                "Higher quality": "higher-quality compression with a larger file",
+            }[quality_choice]
+            resolution_instruction = {
+                "Keep original (Recommended)": "Keep original resolution",
+                "1080p": "Scale to 1080p",
+                "720p": "Scale to 720p",
+            }[resolution_choice]
+            fps_instruction = {
+                "Keep original (Recommended)": "Keep original frame rate",
+                "60 fps": "Use 60 fps",
+                "30 fps": "Use 30 fps",
+            }[fps_choice]
+
+            return (
+                f"Compress {target_name} for sharing using {quality_instruction}. "
+                f"{resolution_instruction}. {fps_instruction}. "
+                f"Preserve clear audio and save as {output_name}."
+            )
+
+        if action == "Change file format":
+            target_format = questionary.select(
+                "Choose output format:",
+                choices=["mp4", "mkv", "mov", "webm"],
+            ).ask()
+            output_name = _ask_output_name(
+                "Output filename:",
+                _suggest_output_name(target_file, "converted", f".{target_format}"),
+            )
+            return (
+                f"Convert {target_name} to {target_format.upper()} with good visual quality and "
+                f"proper audio sync. Save as {output_name}."
+            )
+
+        if action == "Extract audio only":
+            audio_format = questionary.select(
+                "Choose audio format:",
+                choices=["mp3", "aac", "wav"],
+            ).ask()
+            output_name = _ask_output_name(
+                "Output filename:",
+                _suggest_output_name(target_file, "audio", f".{audio_format}"),
+            )
+            return (
+                f"Extract audio only from {target_name} and save as {output_name}. "
+                f"Keep clear listening quality."
+            )
+
+        if action == "Remove audio from video":
+            output_name = _ask_output_name(
+                "Output filename:",
+                _suggest_output_name(target_file, "muted", Path(target_file).suffix or ".mp4"),
+            )
+            return f"Remove audio from {target_name} while keeping video quality. Save as {output_name}."
+
+
 def main(argv=None):
     args = parse_args(argv)
     console.clear()
     console.print(
         Panel(
-            "[bold cyan]OpenMedia AI[/]\n[italic]Agentic Local Edition (Phase 2)[/]",
+            "[bold cyan]OpenMedia AI[/]\n"
+            "[italic]Guided Local Media Editor[/]\n\n"
+            "[dim]New here? Use arrow keys + Enter.\n"
+            "1) Pick a file\n"
+            "2) Pick a guided task (or custom)\n"
+            "3) Review and run\n"
+            "Tip: Use --dry-run to preview without rendering.[/]",
             expand=False,
             border_style="cyan",
         )
@@ -161,27 +329,21 @@ def main(argv=None):
         open_settings_menu()
         return
 
-    query = questionary.text("What should we do? (or type /settings)").ask()
-    if not query:
-        return
-    if query.strip().lower() == "/settings":
-        open_settings_menu()
-        return
-
-    local_files = utils.get_local_media_files()
-    target_file = utils.find_best_match(query, local_files)
-
-    if not target_file and local_files:
-        target_file = questionary.select(
-            "I couldn't identify the file. Which one do you want to edit?",
-            choices=local_files + ["None / Type manually"],
-        ).ask()
-
-    if target_file == "None / Type manually":
-        target_file = questionary.text("Enter filename:").ask()
-
+    target_file = _select_target_file()
     if not target_file:
         return
+
+    query = _collect_user_request(target_file)
+    if not query:
+        return
+
+    console.print(
+        Panel(
+            f"[bold]Selected file:[/] {target_file}\n[bold]Requested edit:[/] {query}",
+            title="Step 3/3: Review",
+            border_style="blue",
+        )
+    )
 
     encoding_preference, effective_encoder_family, nvenc_available = _resolve_encoding_mode()
     if not encoding_preference:
