@@ -1,4 +1,5 @@
 import os
+import datetime
 
 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac')
 
@@ -13,3 +14,18 @@ def find_best_match(user_query, files):
         if name_only in user_query.lower():
             return f
     return None
+
+def log_command(user_prompt, generated_command, status="SUCCESS"):
+    """Saves the command history to a local text file."""
+    log_file = "history.log"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    log_entry = (
+        f"[{timestamp}] STATUS: {status}\n"
+        f"PROMPT: {user_prompt}\n"
+        f"COMMAND: {generated_command}\n"
+        f"{'-'*50}\n"
+    )
+    
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(log_entry)
