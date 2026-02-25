@@ -9,6 +9,8 @@ dependencies = [
     "requests",
     "rich",
     "questionary",
+    "pydantic",
+    "langgraph",
 ]
 
 [project.scripts]
