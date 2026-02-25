@@ -70,6 +70,7 @@ def open_settings_menu():
                 "Reset all saved settings",
                 "Back",
             ],
+            style=OM_STYLE
         ).ask()
 
         if not choice or choice == "Back":
@@ -79,6 +80,7 @@ def open_settings_menu():
             encoding = questionary.select(
                 "Default encoding mode:",
                 choices=["auto", "nvidia", "cpu"],
+                style=OM_STYLE
             ).ask()
             if encoding:
                 utils.set_encoding_preference(encoding)
@@ -89,6 +91,7 @@ def open_settings_menu():
             llm_mode = questionary.select(
                 "Default Ollama runtime mode:",
                 choices=["auto", "gpu", "cpu"],
+                style=OM_STYLE
             ).ask()
             if llm_mode:
                 utils.set_llm_runtime_mode(llm_mode)
@@ -96,7 +99,7 @@ def open_settings_menu():
             continue
 
         if choice == "Reset all saved settings":
-            confirmed = questionary.confirm("Reset all saved settings?").ask()
+            confirmed = questionary.confirm("Reset all saved settings?", style=OM_STYLE).ask()
             if confirmed:
                 utils.clear_config()
                 console.print("[green]Saved settings reset.[/]")
@@ -112,6 +115,7 @@ def _resolve_encoding_mode():
         encoding_preference = questionary.select(
             "Choose default encoding mode (saved for future runs):",
             choices=["auto", "nvidia", "cpu"],
+            style=OM_STYLE
         ).ask()
         if not encoding_preference:
             return None, None, None
@@ -140,6 +144,7 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
         llm_runtime_mode = questionary.select(
             "Choose Ollama runtime mode (saved for future runs):",
             choices=["auto", "gpu", "cpu"],
+            style=OM_STYLE
         ).ask()
         if not llm_runtime_mode:
             return None, None
@@ -149,7 +154,7 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
     if llm_runtime_mode == "auto":
         llm_effective_mode = "cpu" if effective_encoder_family == "nvidia" else "gpu"
     elif llm_runtime_mode == "gpu" and not nvenc_available:
-        console.print(
+        console_print(
             "[yellow]GPU mode requested for Ollama but GPU encode support is unavailable. "
             "Falling back to CPU inference.[/]"
         )
@@ -165,7 +170,7 @@ def _suggest_output_name(target_file, suffix, new_ext=None):
 
 
 def _ask_output_name(prompt, default_name):
-    output_name = questionary.text(prompt, default=default_name).ask()
+    output_name = questionary.text(prompt, default=default_name, style=OM_STYLE).ask()
     if not output_name:
         return default_name
     return output_name.strip().strip('"')
@@ -180,21 +185,22 @@ def _select_target_file():
         choices.extend(["Type a path manually", "Cancel"])
 
         choice = questionary.select(
-            "Step 1/3: Choose the media file to edit:",
+            "Select the media file to process:",
             choices=choices,
+            style=OM_STYLE
         ).ask()
 
         if not choice or choice == "Cancel":
             return None
 
         if choice == "Type a path manually":
-            manual_path = questionary.text("Enter file path:").ask()
+            manual_path = questionary.text("Enter file path:", style=OM_STYLE).ask()
             if not manual_path:
                 return None
             manual_path = manual_path.strip().strip('"')
             if not Path(manual_path).exists():
                 console.print(f"[yellow]File not found: {manual_path}[/]")
-                retry = questionary.confirm("Try another path?").ask()
+                retry = questionary.confirm("Try another path?", style=OM_STYLE).ask()
                 if retry:
                     continue
                 return None
@@ -208,7 +214,7 @@ def _collect_user_request(target_file):
 
     while True:
         action = questionary.select(
-            "Step 2/3: Choose what you want to do:",
+            "What would you like to do?",
             choices=[
                 "Compress for sharing (Recommended)",
                 "Change file format",
@@ -218,6 +224,7 @@ def _collect_user_request(target_file):
                 "Open settings",
                 "Cancel",
             ],
+            style=OM_STYLE
         ).ask()
 
         if not action or action == "Cancel":
@@ -229,8 +236,9 @@ def _collect_user_request(target_file):
 
         if action == "Custom request":
             query = questionary.text(
-                "Describe your edit request:",
+                "Describe your request:",
                 default=f"Optimize {target_name} for sharing while preserving quality.",
+                style=OM_STYLE
             ).ask()
             if not query:
                 return None
@@ -247,14 +255,17 @@ def _collect_user_request(target_file):
                     "Smaller file size",
                     "Higher quality",
                 ],
+                style=OM_STYLE
             ).ask()
             resolution_choice = questionary.select(
                 "Output resolution:",
                 choices=["Keep original (Recommended)", "1080p", "720p"],
+                style=OM_STYLE
             ).ask()
             fps_choice = questionary.select(
                 "Frame rate:",
                 choices=["Keep original (Recommended)", "60 fps", "30 fps"],
+                style=OM_STYLE
             ).ask()
             output_name = _ask_output_name(
                 "Output filename:",
@@ -287,6 +298,7 @@ def _collect_user_request(target_file):
             target_format = questionary.select(
                 "Choose output format:",
                 choices=["mp4", "mkv", "mov", "webm"],
+                style=OM_STYLE
             ).ask()
             output_name = _ask_output_name(
                 "Output filename:",
@@ -301,6 +313,7 @@ def _collect_user_request(target_file):
             audio_format = questionary.select(
                 "Choose audio format:",
                 choices=["mp3", "aac", "wav"],
+                style=OM_STYLE
             ).ask()
             output_name = _ask_output_name(
                 "Output filename:",
@@ -323,8 +336,7 @@ def _render_welcome(args):
     dry_run_label = "ON" if args.dry_run else "OFF"
     ultra_safe_label = "ON" if args.ultra_safe else "OFF"
     
-    banner = r"""
-[bold cyan]
+    banner_large = r"""
   ____  _____  _____ _   _ __  __ _____ ____ ___    _    
  / __ \|  __ \|  ___| \ | |  \/  | ____|  _ \_ _|  / \   
 | |  | | |__) | |__ |  \| | |\/| |  _| | | | | |  / _ \  
@@ -336,18 +348,23 @@ def _render_welcome(args):
 | |   | |    | | 
 | |___| |___ | | 
  \____|_____|___|
-[/]"""
+"""
+    banner_small = "[bold cyan]OPENMEDIA CLI v1.1.0[/]"
 
     # Metasploit style stats
-    stats = [
+    stats_lines = [
         f"=[ [bold white]openmedia v1.1.0-stable[/] ]",
         f"+ -- --=[ [cyan]Model:[/] Qwen2.5-Coder:7B (Local/Ollama) ]",
         f"+ -- --=[ [cyan]Enablers:[/] FFmpeg, LangGraph, Rich ]",
         f"+ -- --=[ [cyan]System:[/] dry-run={dry_run_label}, ultra-safe={ultra_safe_label} ]",
     ]
     
-    console.print(banner)
-    for line in stats:
+    if console.width < 70:
+        console.print(banner_small)
+    else:
+        console.print(Text(banner_large, style="bold cyan"))
+
+    for line in stats_lines:
         console.print(line)
     console.print()
 
@@ -377,12 +394,10 @@ def main(argv=None):
         open_settings_menu()
         return
 
-    console.print(Panel("[bold]Step 1/3: Media Selection[/]", style="on grey23", border_style="bright_black"))
     target_file = _select_target_file()
     if not target_file:
         return
 
-    console.print(Panel("[bold]Step 2/3: Transformation Task[/]", style="on grey23", border_style="bright_black"))
     query = _collect_user_request(target_file)
     if not query:
         return
@@ -390,9 +405,10 @@ def main(argv=None):
     console.print(
         Panel(
             f"[bold]Selected file:[/] {target_file}\n[bold]Requested edit:[/] {query}",
-            title="Step 3/3: Review",
+            title="Review Request",
             border_style="blue",
-            style="on grey23"
+            style="on grey23",
+            expand=False
         )
     )
 
@@ -445,6 +461,7 @@ def main(argv=None):
                 f"[yellow]{prepared_cmd}[/]",
                 title="[bold green]AI Recommended Command[/]",
                 subtitle=f"Generated in {final_state['iteration_count']} attempt(s)",
+                expand=False
             )
         )
 
@@ -459,7 +476,7 @@ def main(argv=None):
             )
             return
 
-        if questionary.confirm("Execute this command?").ask():
+        if questionary.confirm("Execute this command?", style=OM_STYLE).ask():
             with console.status("[bold blue]Rendering media via FFmpeg...[/]"):
                 success, msg = executor.run_ffmpeg(
                     prepared_cmd,
@@ -479,6 +496,7 @@ def main(argv=None):
             Panel(
                 f"[bold red]Agent failed to generate a safe command:[/]\n{error}",
                 title="Process Failed",
+                expand=False
             )
         )
 
