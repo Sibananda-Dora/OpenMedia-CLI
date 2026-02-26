@@ -7,7 +7,6 @@ FORBIDDEN_TOKENS = {
     "rm",
     "del",
     "erase",
-    "format",
     "powershell",
     "cmd",
     "bash",
@@ -178,4 +177,54 @@ def validator_node(state: AgentState):
 
     state.is_valid = True
     state.error_message = None
+    return state
+
+def safety_reviewer_node(state: AgentState):
+    """A second-pass safety check using the LLM to verify malicious intent."""
+    if not state.is_valid or not state.generated_command:
+        return state
+
+    print(f"[Safety Review] Auditing command for hidden risks...")
+    
+    audit_prompt = f"""
+    You are a Senior Security Engineer and FFmpeg expert.
+    
+    User Intent: {state.user_input}
+    Generated Command: {state.generated_command}
+    Media Context: {state.media_context}
+    Effective Encoder: {state.effective_encoder_family}
+    
+    Analyze the command for:
+    1. Malicious intent (hidden shell escapes, file deletions, system calls).
+    2. Side effects (overwriting important files outside of the output name).
+    3. Technical correctness (does it actually do what the user asked?).
+    
+    Rules:
+    - If it is 100% safe and correct, output ONLY 'APPROVED'.
+    - If it is dangerous or incorrect, output 'REJECTED: [reason]'.
+    """
+
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "qwen2.5-coder:7b-instruct-q4_K_M",
+                "prompt": audit_prompt,
+                "stream": False,
+                "keep_alive": 0,
+            },
+            timeout=45
+        )
+        response.raise_for_status()
+        review = response.json()["response"].strip()
+        
+        if review.startswith("APPROVED"):
+            state.is_valid = True
+        else:
+            state.is_valid = False
+            state.error_message = f"Security Audit Failed: {review}"
+    except Exception as exc:
+        state.is_valid = False
+        state.error_message = f"Safety Audit unreachable: {exc}"
+
     return state
