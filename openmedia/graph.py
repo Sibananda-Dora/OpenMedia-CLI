@@ -20,7 +20,13 @@ def create_agent():
         if state.is_valid:
             return END
         if state.iteration_count >= 3:
-            return END # Stop if we are looping too much
+            # Add clear error message when max iterations reached
+            if not state.error_message or "failed after" not in state.error_message.lower():
+                state.error_message = (
+                    f"Agent failed after {state.iteration_count} attempts. "
+                    f"Last error: {state.error_message or 'Unable to generate valid command'}"
+                )
+            return END
         return "planner"
 
     workflow.add_conditional_edges("reviewer", router)

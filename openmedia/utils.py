@@ -4,8 +4,19 @@ import os
 import subprocess
 from pathlib import Path
 
-VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac')
+VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
 CONFIG_FILE = Path.home() / ".openmedia_config.json"
+
+def get_media_type(file_path):
+    """Categorizes a file based on its extension."""
+    ext = Path(file_path).suffix.lower()
+    if ext in ('.mp4', '.mkv', '.mov', '.avi', '.webm'):
+        return "video"
+    if ext in ('.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'):
+        return "audio"
+    if ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
+        return "image"
+    return "unknown"
 
 def format_size(size_bytes):
     """Formats bytes into a human-readable string (MB, GB)."""
@@ -95,7 +106,7 @@ def is_nvenc_available():
     """Detects NVENC support by checking ffmpeg encoders output."""
     command = ["ffmpeg", "-hide_banner", "-encoders"]
     try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
         output = (result.stdout or "") + (result.stderr or "")
         normalized = output.lower()
         return ("h264_nvenc" in normalized) or ("hevc_nvenc" in normalized)
@@ -128,17 +139,20 @@ def build_media_context(file_path):
     metadata, error = probe_media_file(file_path)
     if error:
         return f"Unavailable ({error})"
+    
+    if metadata is None:
+        return "Unavailable (No metadata)"
 
-    format_info = metadata.get("format", {})
+    fmt = metadata.get("format", {})
     streams = metadata.get("streams", [])
 
     video_stream = next((s for s in streams if s.get("codec_type") == "video"), {})
     audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), {})
 
-    duration = format_info.get("duration", "unknown")
-    container = format_info.get("format_name", "unknown")
-    bit_rate = format_info.get("bit_rate", "unknown")
-    size = format_info.get("size", "unknown")
+    duration = fmt.get("duration", "unknown")
+    container = fmt.get("format_name", "unknown")
+    bit_rate = fmt.get("bit_rate", "unknown")
+    size = fmt.get("size", "unknown")
 
     video_codec = video_stream.get("codec_name", "none")
     width = video_stream.get("width", "unknown")
@@ -169,3 +183,14 @@ def log_command(user_prompt, generated_command, status="SUCCESS"):
     
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(log_entry)
+
+def check_ollama_model(model_name="qwen2.5-coder:7b-instruct-q4_K_M"):
+    """Checks if a specific Ollama model is available."""
+    try:
+        import requests
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response.raise_for_status()
+        models = response.json().get("models", [])
+        return any(model_name in m.get("name", "") for m in models)
+    except Exception:
+        return False

@@ -1,3 +1,12 @@
+"""
+DEPRECATED: This module is no longer used in the current implementation.
+
+Command generation is now handled by nodes.py via generator_node().
+This file is kept for backward compatibility and reference purposes only.
+
+If you need to modify command generation logic, edit openmedia/nodes.py instead.
+"""
+
 import requests
 
 # You can easily swap this to qwen3-vl or llama3.2 later
@@ -11,7 +20,11 @@ You are an expert FFmpeg assistant.
 """
 
 def generate_command(user_query, target_file):
-    """Sends the context to the local LLM and retrieves the command."""
+    """
+    DEPRECATED: Use generator_node() from openmedia.nodes instead.
+    
+    Sends the context to the local LLM and retrieves the command.
+    """
     context = f"Target File: {target_file}\nUser Request: {user_query}"
     
     try:

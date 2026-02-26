@@ -4,8 +4,45 @@ import subprocess
 from pathlib import Path
 from openmedia.utils import log_command
 
+VIDEO_OUTPUT_EXTENSIONS = {
+    ".mp4",
+    ".mkv",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".ts",
+    ".m2ts",
+    ".m4v",
+    ".flv",
+    ".mpeg",
+    ".mpg",
+    ".wmv",
+    ".3gp",
+}
+NON_VIDEO_OUTPUT_EXTENSIONS = {
+    ".gif",
+    ".webp",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".bmp",
+    ".mp3",
+    ".wav",
+    ".aac",
+    ".flac",
+    ".ogg",
+    ".m4a",
+}
+
 def _tokenize_command(command):
-    return shlex.split(command, posix=False)
+    tokens = shlex.split(command, posix=False)
+    normalized = []
+    for token in tokens:
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
+            normalized.append(token[1:-1])
+        else:
+            normalized.append(token)
+    return normalized
 
 def _build_command(tokens):
     return subprocess.list2cmdline(tokens)
@@ -82,6 +119,18 @@ def _extract_primary_input(tokens, target_file):
             return _strip_quotes(tokens[idx + 1])
     return "output.mp4"
 
+def _infer_output_extension(tokens, target_file=None):
+    for token in reversed(tokens[1:]):
+        cleaned = _strip_quotes(token)
+        if not cleaned or cleaned.startswith("-"):
+            continue
+        ext = Path(cleaned).suffix.lower()
+        if ext:
+            return ext
+    if target_file:
+        return Path(target_file).suffix.lower()
+    return ""
+
 def _ensure_safe_output_target(tokens, target_file):
     """
     Ensures output naming policy:
@@ -104,7 +153,10 @@ def _ensure_safe_output_target(tokens, target_file):
     if not output_raw or output_raw.startswith("-"):
         output_path = _default_output_path(primary_input)
         output_path = _next_available_output(output_path)
-        tokens.append(output_path)
+        if output_idx >= 0 and not output_raw.startswith("-"):
+            tokens[output_idx] = output_path
+        else:
+            tokens.append(output_path)
         return True
     if output_raw.lower() == "output_file.mp4":
         output_path = _default_output_path(primary_input)
@@ -144,13 +196,16 @@ def prepare_command_for_safe_execution(
 
     changed = False
     safe_threads = str(_cap_cpu_threads(ultra_safe))
+    output_ext = _infer_output_extension(tokens, target_file)
+    is_non_video_target = output_ext in NON_VIDEO_OUTPUT_EXTENSIONS
+    is_video_target = (output_ext in VIDEO_OUTPUT_EXTENSIONS) or (not output_ext and not is_non_video_target)
 
     if not _contains_option(tokens, "-threads"):
         _upsert_option(tokens, "-threads", safe_threads)
         changed = True
 
     family = (encoder_family or "").lower()
-    if family == "cpu":
+    if family == "cpu" and is_video_target:
         _upsert_option(tokens, "-c:v", "libx264")
         _upsert_option(tokens, "-preset", "superfast" if ultra_safe else "veryfast")
         changed = True
@@ -160,7 +215,7 @@ def prepare_command_for_safe_execution(
         if not has_crf and not has_bitrate:
             _upsert_option(tokens, "-crf", "25" if ultra_safe else "23")
             changed = True
-    elif family == "nvidia":
+    elif family == "nvidia" and is_video_target:
         codec_value = (_get_option_value(tokens, "-c:v") or "").lower()
         if not codec_value.endswith("nvenc"):
             _upsert_option(tokens, "-c:v", "h264_nvenc")
@@ -204,20 +259,38 @@ def _process_priority_kwargs():
     return kwargs
 
 def run_ffmpeg(
-    command, user_prompt, encoder_family="cpu", target_file=None, ultra_safe=False
+    command, user_prompt, encoder_family="cpu", target_file=None, ultra_safe=False, timeout=1800
 ):
+    """
+    Executes FFmpeg command with safety measures.
+    
+    Args:
+        command: FFmpeg command to execute
+        user_prompt: Original user request for logging
+        encoder_family: Encoder family (cpu/nvidia)
+        target_file: Input file path
+        ultra_safe: Whether to use ultra-safe mode
+        timeout: Maximum execution time in seconds (default: 1800 = 30 minutes)
+    
+    Returns:
+        Tuple of (success: bool, output: str)
+    """
     prepared_command, _ = prepare_command_for_safe_execution(
         command, encoder_family, target_file, ultra_safe
     )
 
     try:
-        # We use shell=True because FFmpeg commands often use pipes or complex strings
+        prepared_tokens = _tokenize_command(prepared_command)
+        if not prepared_tokens:
+            log_command(user_prompt, prepared_command, "FAILED (Empty prepared command)")
+            return False, "Prepared command is empty."
+
         result = subprocess.run(
-            prepared_command,
-            shell=True,
+            prepared_tokens,
             check=True,
             capture_output=True,
             text=True,
+            timeout=timeout,
             **_process_priority_kwargs()
         )
         
@@ -225,7 +298,12 @@ def run_ffmpeg(
         log_command(user_prompt, prepared_command, "SUCCESS")
         output = (result.stderr or result.stdout or "").strip()
         return True, output
-        
+    except ValueError as exc:
+        log_command(user_prompt, prepared_command, "FAILED (Command parse error)")
+        return False, f"Prepared command parsing failed: {exc}"
+    except subprocess.TimeoutExpired:
+        log_command(user_prompt, prepared_command, f"TIMEOUT (>{timeout}s)")
+        return False, f"FFmpeg execution timed out after {timeout} seconds. Try a smaller file or simpler operation."
     except subprocess.CalledProcessError as e:
         # If FFmpeg fails, we log the failure too
         log_command(user_prompt, prepared_command, f"FAILED (Exit Code: {e.returncode})")

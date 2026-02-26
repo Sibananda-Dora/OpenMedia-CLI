@@ -17,5 +17,3 @@ class AgentState(BaseModel):
     error_message: Optional[str] = None
     iteration_count: int = 0
     history: List[str] = Field(default_factory=list)
-    # We add this to track if the user actually clicked "Yes"
-    execution_confirmed: bool = False
