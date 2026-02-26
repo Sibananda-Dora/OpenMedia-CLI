@@ -7,6 +7,30 @@ from pathlib import Path
 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac')
 CONFIG_FILE = Path.home() / ".openmedia_config.json"
 
+def format_size(size_bytes):
+    """Formats bytes into a human-readable string (MB, GB)."""
+    try:
+        size = float(size_bytes)
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+    except (ValueError, TypeError):
+        return "Unknown"
+    return "Unknown"
+
+def format_bitrate(bitrate_bps):
+    """Formats bitrate (bps) into a human-readable string (kbps, Mbps)."""
+    try:
+        bitrate = float(bitrate_bps)
+        for unit in ["bps", "kbps", "Mbps", "Gbps"]:
+            if bitrate < 1000.0:
+                return f"{bitrate:.2f} {unit}"
+            bitrate /= 1000.0
+    except (ValueError, TypeError):
+        return "Unknown"
+    return "Unknown"
+
 def get_local_media_files():
     """Returns a list of media files in the current working directory."""
     return [f for f in os.listdir('.') if f.lower().endswith(VIDEO_EXTENSIONS)]
