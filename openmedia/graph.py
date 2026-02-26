@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, END
 from openmedia.state import AgentState
-from openmedia.nodes import generator_node, validator_node
+from openmedia.nodes import generator_node, validator_node, safety_reviewer_node
 
 def create_agent():
     workflow = StateGraph(AgentState)
@@ -8,10 +8,12 @@ def create_agent():
     # Add our nodes
     workflow.add_node("planner", generator_node)
     workflow.add_node("checker", validator_node)
+    workflow.add_node("reviewer", safety_reviewer_node)
 
     # Set the flow
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "checker")
+    workflow.add_edge("checker", "reviewer")
 
     # The Decision Point
     def router(state: AgentState):
@@ -21,7 +23,7 @@ def create_agent():
             return END # Stop if we are looping too much
         return "planner"
 
-    workflow.add_conditional_edges("checker", router)
+    workflow.add_conditional_edges("reviewer", router)
     
     return workflow.compile()
 
