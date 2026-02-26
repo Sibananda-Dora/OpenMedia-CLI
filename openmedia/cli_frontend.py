@@ -6,6 +6,7 @@ import requests
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+from rich.table import Table
 from questionary import Style
 
 from openmedia.graph import media_agent
@@ -30,6 +31,15 @@ OM_STYLE = Style([
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="OpenMedia CLI")
+    
+    # Create subparsers for commands like 'info'
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # 'info' command
+    info_parser = subparsers.add_parser("info", help="Display technical information about a media file.")
+    info_parser.add_argument("path", help="Path to the media file.")
+
+    # Main interactive mode flags
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -46,6 +56,67 @@ def parse_args(argv=None):
         help="Use lower-resource defaults for smoother thermals and responsiveness.",
     )
     return parser.parse_args(argv)
+
+
+def display_media_info(file_path):
+    """Displays a professional technical table of the media file's streams."""
+    metadata, error = utils.probe_media_file(file_path)
+    if error:
+        console.print(f"[bold red]Error probing file:[/] {error}")
+        return
+
+    fmt = metadata.get("format", {})
+    streams = metadata.get("streams", [])
+
+    # Global File Info Panel
+    file_info = (
+        f"[bold white]File:[/] {Path(file_path).name}\n"
+        f"[bold white]Size:[/] {utils.format_size(fmt.get('size'))} | "
+        f"[bold white]Duration:[/] {float(fmt.get('duration', 0)):.2f}s | "
+        f"[bold white]Bitrate:[/] {utils.format_bitrate(fmt.get('bit_rate'))}"
+    )
+    console.print(Panel(file_info, title="[bold cyan]Media Technical Summary[/]", expand=False, border_style="cyan"))
+
+    # Streams Table
+    table = Table(title="[bold white]Stream Mapping[/]", header_style="bold magenta", expand=False)
+    table.add_column("Idx", justify="right", style="dim")
+    table.add_column("Type", justify="center")
+    table.add_column("Codec", style="bold")
+    table.add_column("Details", style="white")
+
+    for s in streams:
+        idx = s.get("index")
+        ctype = s.get("codec_type", "unknown").upper()
+        codec = s.get("codec_name", "unknown")
+        
+        details = ""
+        if ctype == "VIDEO":
+            color = "green"
+            res = f"{s.get('width')}x{s.get('height')}"
+            fps = s.get("r_frame_rate", "0/0")
+            try:
+                num, den = map(int, fps.split('/'))
+                fps_val = f"{num/den:.2f} fps" if den != 0 else "unknown"
+            except: fps_val = fps
+            pix_fmt = s.get("pix_fmt", "unknown")
+            details = f"{res} | {fps_val} | {pix_fmt}"
+        elif ctype == "AUDIO":
+            color = "cyan"
+            channels = s.get("channels", "unknown")
+            sr = s.get("sample_rate", "unknown")
+            details = f"{channels} ch | {int(sr)/1000 if sr.isdigit() else sr} kHz"
+        else:
+            color = "magenta"
+            details = s.get("tags", {}).get("language", "unknown")
+
+        table.add_row(
+            str(idx),
+            f"[bold {color}]{ctype}[/]",
+            codec,
+            details
+        )
+
+    console.print(table)
 
 
 def check_ollama():
@@ -383,6 +454,15 @@ def _render_welcome(args):
 
 def main(argv=None):
     args = parse_args(argv)
+    
+    # Handle 'info' command
+    if args.command == "info":
+        if not Path(args.path).exists():
+            console.print(f"[bold red]X File not found:[/] {args.path}")
+            return
+        display_media_info(args.path)
+        return
+
     console.clear()
     _render_welcome(args)
 
@@ -397,6 +477,10 @@ def main(argv=None):
     target_file = _select_target_file()
     if not target_file:
         return
+
+    # Show technical info table before asking for request
+    display_media_info(target_file)
+    console.print()
 
     query = _collect_user_request(target_file)
     if not query:
