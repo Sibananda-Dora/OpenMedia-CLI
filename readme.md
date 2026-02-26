@@ -1,3 +1,6 @@
+# DON'T USE IT YET, YOU CAN CHECK THE CODEBASE BUT IT IS NOT MY PROBLEM IF YOU MODEL HALLUCINATES AND RAN A DANGEROUS CODE IN THE SHELL. WAIT TILL I ADD MORE SECURITY LOGIC.
+
+
 # 🎬 OpenMedia CLI (Local Edition)
 
 > **Translate human intent into high-performance FFmpeg commands using Local Models.**
