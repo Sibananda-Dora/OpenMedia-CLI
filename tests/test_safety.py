@@ -2,9 +2,10 @@ import shlex
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from openmedia.executor import prepare_command_for_safe_execution
-from openmedia.nodes import validator_node
+from openmedia.nodes import safety_reviewer_node, validator_node
 from openmedia.state import AgentState
 
 
@@ -92,6 +93,22 @@ class SafetyPipelineTests(unittest.TestCase):
         self.assertIn("-cq", tokens)
         self.assertEqual(tokens[tokens.index("-cq") + 1], "28")
 
+    def test_nvidia_tuning_does_not_force_nvenc_for_gif_output(self):
+        command = (
+            'ffmpeg -i input.mp4 -filter_complex '
+            '"fps=15,scale=480:-1:flags=lanczos,split[s0][s1];'
+            '[s0]palettegen[p];[s1][p]paletteuse" out.gif'
+        )
+        tuned_command, changed = prepare_command_for_safe_execution(
+            command, "nvidia", "input.mp4"
+        )
+        tokens = shlex.split(tuned_command, posix=False)
+
+        self.assertNotIn("h264_nvenc", [t.lower() for t in tokens])
+        self.assertNotIn("-cq", tokens)
+        self.assertNotIn("-crf", tokens)
+        self.assertIn("out.gif", tuned_command)
+
     def test_validator_blocks_nvidia_crf(self):
         state = AgentState(
             user_input="compress",
@@ -103,6 +120,75 @@ class SafetyPipelineTests(unittest.TestCase):
         self.assertFalse(out.is_valid)
         self.assertIn("'-cq' instead of '-crf'", out.error_message)
 
+    def test_validator_blocks_embedded_shell_operators(self):
+        for cmd in [
+            "ffmpeg -i input.mp4 out.mp4&del input.mp4",
+            "ffmpeg -i input.mp4 out.mp4;del input.mp4",
+            "ffmpeg -i input.mp4 out.mp4>nul",
+            "ffmpeg -i input.mp4 out.mp4|more",
+        ]:
+            state = AgentState(
+                user_input="convert",
+                target_file="input.mp4",
+                effective_encoder_family="cpu",
+                generated_command=cmd,
+            )
+            out = validator_node(state)
+            self.assertFalse(out.is_valid)
+            self.assertIn("Unsafe format", out.error_message)
+
+    def test_validator_allows_gif_without_nvenc_in_nvidia_mode(self):
+        state = AgentState(
+            user_input="make gif",
+            target_file="input.mp4",
+            effective_encoder_family="nvidia",
+            generated_command=(
+                'ffmpeg -i input.mp4 -filter_complex '
+                '"fps=15,scale=480:-1:flags=lanczos,split[s0][s1];'
+                '[s0]palettegen[p];[s1][p]paletteuse" out.gif'
+            ),
+        )
+        out = validator_node(state)
+        self.assertTrue(out.is_valid)
+
+    def test_validator_allows_webp_with_libwebp_in_nvidia_mode(self):
+        state = AgentState(
+            user_input="convert to webp",
+            target_file="input.gif",
+            effective_encoder_family="nvidia",
+            generated_command=(
+                "ffmpeg -i input.gif -c:v libwebp -lossless 1 out.webp"
+            ),
+        )
+        out = validator_node(state)
+        self.assertTrue(out.is_valid)
+
+    def test_validator_rejects_gif_with_multiple_inputs(self):
+        state = AgentState(
+            user_input="make gif",
+            target_file="input.mp4",
+            effective_encoder_family="nvidia",
+            generated_command=(
+                'ffmpeg -i input.mp4 -vf "fps=30,scale=720:-1:flags=lanczos,palettegen" '
+                'palette.png -i input.mp4 -i palette.png '
+                '-filter_complex "[0:v]fps=30,scale=720:-1:flags=lanczos[p];[p][1:v]paletteuse" out.gif'
+            ),
+        )
+        out = validator_node(state)
+        self.assertFalse(out.is_valid)
+        self.assertIn("GIF policy violation", out.error_message)
+
+    def test_validator_rejects_gif_palettegen_without_paletteuse(self):
+        state = AgentState(
+            user_input="make gif",
+            target_file="input.mp4",
+            effective_encoder_family="nvidia",
+            generated_command='ffmpeg -i input.mp4 -vf "fps=30,scale=720:-1,palettegen" out.gif',
+        )
+        out = validator_node(state)
+        self.assertFalse(out.is_valid)
+        self.assertIn("palettegen must be paired with paletteuse", out.error_message)
+
     def test_validator_blocks_shell_chaining(self):
         state = AgentState(
             user_input="convert",
@@ -113,6 +199,45 @@ class SafetyPipelineTests(unittest.TestCase):
         out = validator_node(state)
         self.assertFalse(out.is_valid)
         self.assertIn("shell", out.error_message.lower())
+
+    @patch("openmedia.nodes.requests.post")
+    def test_safety_reviewer_requires_exact_approved(self, mock_post):
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"response": "APPROVED but avoid this command"}
+        mock_post.return_value = mock_response
+
+        state = AgentState(
+            user_input="convert",
+            target_file="input.mp4",
+            media_context="container=mp4",
+            effective_encoder_family="cpu",
+            generated_command="ffmpeg -i input.mp4 out.mp4",
+            is_valid=True,
+        )
+        out = safety_reviewer_node(state)
+        self.assertFalse(out.is_valid)
+        self.assertIsNone(out.generated_command)
+        self.assertIn("Security Audit Failed", out.error_message)
+
+    @patch("openmedia.nodes.requests.post")
+    def test_safety_reviewer_accepts_exact_approved(self, mock_post):
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"response": "APPROVED"}
+        mock_post.return_value = mock_response
+
+        state = AgentState(
+            user_input="convert",
+            target_file="input.mp4",
+            media_context="container=mp4",
+            effective_encoder_family="cpu",
+            generated_command="ffmpeg -i input.mp4 out.mp4",
+            is_valid=True,
+        )
+        out = safety_reviewer_node(state)
+        self.assertTrue(out.is_valid)
+        self.assertEqual(out.generated_command, "ffmpeg -i input.mp4 out.mp4")
 
 
 if __name__ == "__main__":
