@@ -1,17 +1,15 @@
 import argparse
-import re
 from pathlib import Path
-
 import questionary
 import requests
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 from rich.table import Table
+from rich.text import Text
 from questionary import Style
 
 from openmedia.graph import media_agent
-from openmedia.nodes import safety_reviewer_node, validator_node
+from openmedia.nodes import validator_node, safety_reviewer_node
 from openmedia.state import AgentState
 from . import executor, utils
 
@@ -33,15 +31,6 @@ OM_STYLE = Style([
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="OpenMedia CLI")
-    
-    # Create subparsers for commands like 'info'
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    
-    # 'info' command
-    info_parser = subparsers.add_parser("info", help="Display technical information about a media file.")
-    info_parser.add_argument("path", help="Path to the media file.")
-
-    # Main interactive mode flags
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -60,90 +49,13 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def display_media_info(file_path):
-    """Displays a professional technical table of the media file's streams."""
-    metadata, error = utils.probe_media_file(file_path)
-    if error:
-        console.print(f"[bold red]Error probing file:[/] {error}")
-        return
-
-    fmt = metadata.get("format", {})
-    streams = metadata.get("streams", [])
-    raw_duration = fmt.get("duration", 0)
-    try:
-        duration_text = f"{float(raw_duration):.2f}s"
-    except (ValueError, TypeError):
-        duration_text = "unknown"
-
-    # Global File Info Panel
-    file_info = (
-        f"[bold white]File:[/] {Path(file_path).name}\n"
-        f"[bold white]Size:[/] {utils.format_size(fmt.get('size'))} | "
-        f"[bold white]Duration:[/] {duration_text} | "
-        f"[bold white]Bitrate:[/] {utils.format_bitrate(fmt.get('bit_rate'))}"
-    )
-    console.print(Panel(file_info, title="[bold cyan]Media Technical Summary[/]", expand=False, border_style="cyan"))
-
-    # Streams Table
-    table = Table(title="[bold white]Stream Mapping[/]", header_style="bold magenta", expand=False)
-    table.add_column("Idx", justify="right", style="dim")
-    table.add_column("Type", justify="center")
-    table.add_column("Codec", style="bold")
-    table.add_column("Details", style="white")
-
-    for s in streams:
-        idx = s.get("index")
-        ctype = s.get("codec_type", "unknown").upper()
-        codec = s.get("codec_name", "unknown")
-        
-        details = ""
-        if ctype == "VIDEO":
-            color = "green"
-            res = f"{s.get('width')}x{s.get('height')}"
-            fps = s.get("r_frame_rate", "0/0")
-            try:
-                num, den = map(int, fps.split('/'))
-                fps_val = f"{num/den:.2f} fps" if den != 0 else "unknown"
-            except (ValueError, ZeroDivisionError, AttributeError):
-                fps_val = str(fps)
-            pix_fmt = s.get("pix_fmt", "unknown")
-            details = f"{res} | {fps_val} | {pix_fmt}"
-        elif ctype == "AUDIO":
-            color = "cyan"
-            channels = s.get("channels", "unknown")
-            sr = s.get("sample_rate", "unknown")
-            if isinstance(sr, (int, float)):
-                details = f"{channels} ch | {int(sr)/1000:.1f} kHz"
-            elif isinstance(sr, str) and sr.isdigit():
-                details = f"{channels} ch | {int(sr)/1000:.1f} kHz"
-            else:
-                details = f"{channels} ch | {sr} kHz"
-        else:
-            color = "magenta"
-            details = s.get("tags", {}).get("language", "unknown")
-
-        table.add_row(
-            str(idx),
-            f"[bold {color}]{ctype}[/]",
-            codec,
-            details
-        )
-
-    console.print(table)
-
-
 def check_ollama():
     """Ping Ollama to ensure the server is running."""
     try:
         requests.get("http://localhost:11434/", timeout=2)
         return True
-    except requests.exceptions.RequestException:
+    except requests.exceptions.ConnectionError:
         return False
-
-
-def check_ollama_model_available():
-    """Check if the required Ollama model is available."""
-    return utils.check_ollama_model("qwen2.5-coder:7b-instruct-q4_K_M")
 
 
 def open_settings_menu():
@@ -159,7 +71,7 @@ def open_settings_menu():
                 "Reset all saved settings",
                 "Back",
             ],
-            style=OM_STYLE
+            style=OM_STYLE,
         ).ask()
 
         if not choice or choice == "Back":
@@ -169,7 +81,7 @@ def open_settings_menu():
             encoding = questionary.select(
                 "Default encoding mode:",
                 choices=["auto", "nvidia", "cpu"],
-                style=OM_STYLE
+                style=OM_STYLE,
             ).ask()
             if encoding:
                 utils.set_encoding_preference(encoding)
@@ -180,7 +92,7 @@ def open_settings_menu():
             llm_mode = questionary.select(
                 "Default Ollama runtime mode:",
                 choices=["auto", "gpu", "cpu"],
-                style=OM_STYLE
+                style=OM_STYLE,
             ).ask()
             if llm_mode:
                 utils.set_llm_runtime_mode(llm_mode)
@@ -204,7 +116,7 @@ def _resolve_encoding_mode():
         encoding_preference = questionary.select(
             "Choose default encoding mode (saved for future runs):",
             choices=["auto", "nvidia", "cpu"],
-            style=OM_STYLE
+            style=OM_STYLE,
         ).ask()
         if not encoding_preference:
             return None, None, None
@@ -233,7 +145,7 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
         llm_runtime_mode = questionary.select(
             "Choose Ollama runtime mode (saved for future runs):",
             choices=["auto", "gpu", "cpu"],
-            style=OM_STYLE
+            style=OM_STYLE,
         ).ask()
         if not llm_runtime_mode:
             return None, None
@@ -241,10 +153,14 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
 
     llm_effective_mode = llm_runtime_mode
     if llm_runtime_mode == "auto":
+        # NOTE: Using NVENC availability as a heuristic for GPU LLM capability.
+        # NVENC is a video encoder and doesn't directly indicate whether the GPU
+        # can run Ollama inference, but it's the best proxy we have without
+        # querying Ollama's GPU status directly.
         llm_effective_mode = "cpu" if effective_encoder_family == "nvidia" else "gpu"
     elif llm_runtime_mode == "gpu" and not nvenc_available:
         console.print(
-            "[yellow]GPU mode requested for Ollama but GPU encode support is unavailable. "
+            "[yellow]GPU mode requested for Ollama but no NVIDIA GPU support detected. "
             "Falling back to CPU inference.[/]"
         )
         llm_effective_mode = "cpu"
@@ -276,7 +192,7 @@ def _select_target_file():
         choice = questionary.select(
             "Select the media file to process:",
             choices=choices,
-            style=OM_STYLE
+            style=OM_STYLE,
         ).ask()
 
         if not choice or choice == "Cancel":
@@ -298,43 +214,35 @@ def _select_target_file():
         return choice
 
 
+# Sentinel returned by _collect_user_request when the user wants to go
+# back and pick a different file instead of proceeding with this one.
+_BACK_TO_FILE_SELECT = "__BACK_TO_FILE_SELECT__"
+
+
 def _collect_user_request(target_file):
     target_name = Path(target_file).name
-    mtype = utils.get_media_type(target_file)
 
     while True:
-        choices = []
-        if mtype == "video":
-            choices = [
+        action = questionary.select(
+            "What do you want to do?",
+            choices=[
                 "Compress for sharing (Recommended)",
                 "Change file format",
-                "Create Animated GIF",
                 "Extract audio only",
                 "Remove audio from video",
-            ]
-        elif mtype == "audio":
-            choices = [
-                "Compress for sharing (Recommended)",
-                "Change file format",
-            ]
-        elif mtype == "image":
-            choices = [
-                "Compress / Optimize",
-                "Convert to WebP (Best for Web)",
-                "Change image format",
-                "Resize image",
-            ]
-        
-        choices.extend(["Custom request", "Open settings", "Cancel"])
-
-        action = questionary.select(
-            "What would you like to do?",
-            choices=choices,
-            style=OM_STYLE
+                "Custom request",
+                "Open settings",
+                "⮜ Back (change file)",
+                "Cancel",
+            ],
+            style=OM_STYLE,
         ).ask()
 
         if not action or action == "Cancel":
             return None
+
+        if action == "⮜ Back (change file)":
+            return _BACK_TO_FILE_SELECT
 
         if action == "Open settings":
             open_settings_menu()
@@ -342,9 +250,9 @@ def _collect_user_request(target_file):
 
         if action == "Custom request":
             query = questionary.text(
-                "Describe your request:",
+                "Describe your edit request:",
                 default=f"Optimize {target_name} for sharing while preserving quality.",
-                style=OM_STYLE
+                style=OM_STYLE,
             ).ask()
             if not query:
                 return None
@@ -353,34 +261,37 @@ def _collect_user_request(target_file):
                 continue
             return query
 
-        if action in ["Compress for sharing (Recommended)", "Compress / Optimize"]:
-            if mtype == "image":
-                quality_choice = questionary.select(
-                    "Optimization target:",
-                    choices=["Lossless (Perfect Quality)", "Balanced", "Small File Size"],
-                    style=OM_STYLE
-                ).ask()
-                return f"Optimize {target_name} using {quality_choice} compression. Keep it as {target_name}."
-            
+        # --- Compress for sharing ---
+        if action == "Compress for sharing (Recommended)":
             quality_choice = questionary.select(
                 "Compression target:",
                 choices=[
                     "Balanced size and quality (Recommended)",
                     "Smaller file size",
                     "Higher quality",
+                    "⮜ Back",
                 ],
-                style=OM_STYLE
+                style=OM_STYLE,
             ).ask()
+            if not quality_choice or quality_choice == "⮜ Back":
+                continue
+
             resolution_choice = questionary.select(
                 "Output resolution:",
-                choices=["Keep original (Recommended)", "1080p", "720p"],
-                style=OM_STYLE
+                choices=["Keep original (Recommended)", "1080p", "720p", "⮜ Back"],
+                style=OM_STYLE,
             ).ask()
+            if not resolution_choice or resolution_choice == "⮜ Back":
+                continue
+
             fps_choice = questionary.select(
                 "Frame rate:",
-                choices=["Keep original (Recommended)", "60 fps", "30 fps"],
-                style=OM_STYLE
+                choices=["Keep original (Recommended)", "60 fps", "30 fps", "⮜ Back"],
+                style=OM_STYLE,
             ).ask()
+            if not fps_choice or fps_choice == "⮜ Back":
+                continue
+
             output_name = _ask_output_name(
                 "Output filename:",
                 _suggest_output_name(target_file, "share", ".mp4"),
@@ -408,84 +319,35 @@ def _collect_user_request(target_file):
                 f"Preserve clear audio and save as {output_name}."
             )
 
-        if action == "Create Animated GIF":
-            fps = questionary.select(
-                "GIF Frame Rate (Higher is smoother, larger file):",
-                choices=["15 fps (Standard)", "30 fps (High Quality)", "10 fps (Smallest)"],
-                style=OM_STYLE
-            ).ask()
-            width = questionary.select(
-                "GIF Width (Resolution):",
-                choices=["480px (Recommended)", "720px (HD GIF)", "320px (Small/Emoji size)"],
-                style=OM_STYLE
-            ).ask()
-            output_name = _ask_output_name(
-                "Output filename:",
-                _suggest_output_name(target_file, "anim", ".gif"),
-            )
-            return (
-                f"Create a high-quality animated GIF from {target_name}. "
-                f"Set frame rate to {fps} and width to {width}. "
-                f"Use a professional palettegen filter for best colors in a single ffmpeg command "
-                f"(no command chaining, no temporary files). Save as {output_name}."
-            )
-
-        if action == "Convert to WebP (Best for Web)":
-            quality = questionary.select(
-                "WebP Type:",
-                choices=["Lossless (Perfect Quality)", "Lossy (Smallest File)"],
-                style=OM_STYLE
-            ).ask()
-            output_name = _ask_output_name(
-                "Output filename:",
-                _suggest_output_name(target_file, "optimized", ".webp"),
-            )
-            return f"Convert {target_name} to {quality} WebP format for web optimization. Save as {output_name}."
-
-        if action in ["Change file format", "Change image format"]:
-            if mtype == "video":
-                fmt_choices = ["mp4", "mkv", "mov", "webm"]
-            elif mtype == "audio":
-                fmt_choices = ["mp3", "wav", "aac", "flac"]
-            elif mtype == "image":
-                fmt_choices = ["jpg", "png", "webp", "bmp"]
-            
+        # --- Change file format ---
+        if action == "Change file format":
             target_format = questionary.select(
                 "Choose output format:",
-                choices=fmt_choices,
-                style=OM_STYLE
+                choices=["mp4", "mkv", "mov", "webm", "⮜ Back"],
+                style=OM_STYLE,
             ).ask()
+            if not target_format or target_format == "⮜ Back":
+                continue
+
             output_name = _ask_output_name(
                 "Output filename:",
                 _suggest_output_name(target_file, "converted", f".{target_format}"),
             )
             return (
-                f"Convert {target_name} to {target_format.upper()} with good quality. "
-                f"Save as {output_name}."
+                f"Convert {target_name} to {target_format.upper()} with good visual quality and "
+                f"proper audio sync. Save as {output_name}."
             )
 
-        if action == "Resize image":
-            size = questionary.select(
-                "Scale image to:",
-                choices=["50% smaller", "200% larger (Upscale)", "Custom resolution"],
-                style=OM_STYLE
-            ).ask()
-            if size == "Custom resolution":
-                res = questionary.text("Enter width:height (e.g. 1920:1080):", style=OM_STYLE).ask()
-                size = f"at {res} resolution"
-            
-            output_name = _ask_output_name(
-                "Output filename:",
-                _suggest_output_name(target_file, "resized"),
-            )
-            return f"Resize {target_name} to {size} and save as {output_name}."
-
+        # --- Extract audio only ---
         if action == "Extract audio only":
             audio_format = questionary.select(
                 "Choose audio format:",
-                choices=["mp3", "aac", "wav"],
-                style=OM_STYLE
+                choices=["mp3", "aac", "wav", "⮜ Back"],
+                style=OM_STYLE,
             ).ask()
+            if not audio_format or audio_format == "⮜ Back":
+                continue
+
             output_name = _ask_output_name(
                 "Output filename:",
                 _suggest_output_name(target_file, "audio", f".{audio_format}"),
@@ -495,7 +357,14 @@ def _collect_user_request(target_file):
                 f"Keep clear listening quality."
             )
 
+        # --- Remove audio from video ---
         if action == "Remove audio from video":
+            confirm = questionary.confirm(
+                f"Remove audio from {target_name}?", style=OM_STYLE
+            ).ask()
+            if not confirm:
+                continue
+
             output_name = _ask_output_name(
                 "Output filename:",
                 _suggest_output_name(target_file, "muted", Path(target_file).suffix or ".mp4"),
@@ -503,222 +372,73 @@ def _collect_user_request(target_file):
             return f"Remove audio from {target_name} while keeping video quality. Save as {output_name}."
 
 
-def _build_gif_fallback_command(query, target_file):
-    """Builds a deterministic single-pass GIF command when LLM retries are exhausted."""
-    fps = 15
-    width = 480
-    output_name = _suggest_output_name(target_file, "anim", ".gif")
+def _display_media_info(target_file):
+    """Probes the file and displays a Rich table with media metadata."""
+    metadata, error = utils.probe_media_file(target_file)
+    if error or metadata is None:
+        console.print(f"[dim]Media info: {error or 'unavailable'}[/]")
+        return
 
-    fps_match = re.search(r"(\d{1,3})\s*fps", query, flags=re.IGNORECASE)
-    if fps_match:
-        fps = max(1, min(120, int(fps_match.group(1))))
+    fmt = metadata.get("format", {})
+    streams = metadata.get("streams", [])
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), {})
 
-    width_match = re.search(r"(\d{2,5})\s*px", query, flags=re.IGNORECASE)
-    if width_match:
-        width = max(64, min(4096, int(width_match.group(1))))
+    table = Table(title="Media Info", border_style="bright_black", expand=False)
+    table.add_column("Property", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
 
-    output_match = re.search(r"save as\s+([^\n\r]+?\.gif)\b", query, flags=re.IGNORECASE)
-    if output_match:
-        candidate = output_match.group(1).strip().strip('"').strip("'")
-        if candidate:
-            output_name = candidate
+    # Format
+    table.add_row("Container", fmt.get("format_name", "unknown"))
 
-    return (
-        f'ffmpeg -i "{target_file}" '
-        f'-filter_complex '
-        f'"[0:v]fps={fps},scale={width}:-1:flags=lanczos,split[s0][s1];'
-        f'[s0]palettegen[p];[s1][p]paletteuse" '
-        f'"{output_name}"'
-    )
-
-def _audit_command_for_execution(
-    command, user_input, target_file, media_context, effective_encoder_family
-):
-    """
-    Ensures deterministic fallback commands pass the same validator + reviewer pipeline
-    before execution.
-    """
-    audit_state = AgentState(
-        user_input=user_input,
-        target_file=target_file,
-        media_context=media_context,
-        effective_encoder_family=effective_encoder_family,
-        generated_command=command,
-        is_valid=True,
-        iteration_count=0,
-        history=[],
-    )
-    audit_state = validator_node(audit_state)
-    if audit_state.is_valid:
-        audit_state = safety_reviewer_node(audit_state)
-    return audit_state
-
-def _build_webp_fallback_command(query, target_file):
-    """Builds a deterministic WebP conversion command when LLM retries are exhausted."""
-    output_name = _suggest_output_name(target_file, "optimized", ".webp")
-    output_match = re.search(r"save as\s+([^\n\r]+?\.webp)\b", query, flags=re.IGNORECASE)
-    if output_match:
-        candidate = output_match.group(1).strip().strip('"').strip("'")
-        if candidate:
-            output_name = candidate
-
-    if "lossless" in query.lower():
-        return f'ffmpeg -i "{target_file}" -lossless 1 "{output_name}"'
-    return f'ffmpeg -i "{target_file}" -quality 75 "{output_name}"'
-
-def _extract_output_name_from_query(query, extension):
-    pattern = rf"save as\s+([^\n\r]+?\{extension})\b"
-    match = re.search(pattern, query, flags=re.IGNORECASE)
-    if not match:
-        return None
-    candidate = match.group(1).strip().strip('"').strip("'")
-    return candidate or None
-
-def _build_remove_audio_fallback_command(query, target_file):
-    output_name = _extract_output_name_from_query(query, ".mp4")
-    if not output_name:
-        output_name = _suggest_output_name(target_file, "muted", Path(target_file).suffix or ".mp4")
-    return f'ffmpeg -i "{target_file}" -an -c:v copy "{output_name}"'
-
-def _build_extract_audio_fallback_command(query, target_file):
-    output_name = _extract_output_name_from_query(query, ".mp3")
-    if not output_name:
-        output_name = _extract_output_name_from_query(query, ".aac")
-    if not output_name:
-        output_name = _extract_output_name_from_query(query, ".wav")
-    if not output_name:
-        output_name = _suggest_output_name(target_file, "audio", ".mp3")
-
-    ext = Path(output_name).suffix.lower()
-    if ext == ".wav":
-        return f'ffmpeg -i "{target_file}" -vn -c:a pcm_s16le "{output_name}"'
-    if ext == ".aac":
-        return f'ffmpeg -i "{target_file}" -vn -c:a aac -b:a 192k "{output_name}"'
-    return f'ffmpeg -i "{target_file}" -vn -c:a libmp3lame -q:a 2 "{output_name}"'
-
-def _build_resize_image_fallback_command(query, target_file):
-    output_name = _extract_output_name_from_query(query, Path(target_file).suffix or ".png")
-    if not output_name:
-        output_name = _suggest_output_name(target_file, "resized", Path(target_file).suffix or ".png")
-
-    ql = query.lower()
-    if "50% smaller" in ql:
-        scale = "iw/2:ih/2"
-    elif "200% larger" in ql:
-        scale = "iw*2:ih*2"
+    # Duration
+    raw_dur = fmt.get("duration")
+    if raw_dur:
+        try:
+            secs = float(raw_dur)
+            mins, sec = divmod(int(secs), 60)
+            hrs, mins = divmod(mins, 60)
+            dur_str = f"{hrs:02d}:{mins:02d}:{sec:02d}" if hrs else f"{mins:02d}:{sec:02d}"
+        except ValueError:
+            dur_str = raw_dur
     else:
-        custom = re.search(r"at\s+(\d{2,5}:\d{2,5})\s+resolution", ql)
-        scale = custom.group(1) if custom else "iw:ih"
+        dur_str = "unknown"
+    table.add_row("Duration", dur_str)
 
-    return f'ffmpeg -i "{target_file}" -vf "scale={scale}" "{output_name}"'
+    # Size
+    raw_size = fmt.get("size")
+    table.add_row("File Size", utils.format_size(raw_size) if raw_size else "unknown")
 
-def _build_change_format_fallback_command(query, target_file, encoder_family):
-    output = None
-    for ext in (".mp4", ".mkv", ".mov", ".webm", ".mp3", ".wav", ".aac", ".flac", ".jpg", ".png", ".webp", ".bmp"):
-        output = _extract_output_name_from_query(query, ext)
-        if output:
-            break
-    if not output:
-        return None
+    # Bitrate
+    raw_br = fmt.get("bit_rate")
+    table.add_row("Bitrate", utils.format_bitrate(raw_br) if raw_br else "unknown")
 
-    output_ext = Path(output).suffix.lower()
-    if output_ext in {".mp3", ".wav", ".aac", ".flac"}:
-        if output_ext == ".wav":
-            return f'ffmpeg -i "{target_file}" -vn -c:a pcm_s16le "{output}"'
-        if output_ext == ".aac":
-            return f'ffmpeg -i "{target_file}" -vn -c:a aac -b:a 192k "{output}"'
-        if output_ext == ".flac":
-            return f'ffmpeg -i "{target_file}" -vn -c:a flac "{output}"'
-        return f'ffmpeg -i "{target_file}" -vn -c:a libmp3lame -q:a 2 "{output}"'
+    # Video stream
+    if video_stream:
+        table.add_row("Video Codec", video_stream.get("codec_name", "none"))
+        w = video_stream.get("width", "?")
+        h = video_stream.get("height", "?")
+        table.add_row("Resolution", f"{w}x{h}")
+        table.add_row("Frame Rate", video_stream.get("r_frame_rate", "unknown"))
 
-    if output_ext in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
-        return f'ffmpeg -i "{target_file}" "{output}"'
+    # Audio stream
+    if audio_stream:
+        table.add_row("Audio Codec", audio_stream.get("codec_name", "none"))
+        sr = audio_stream.get("sample_rate", "unknown")
+        ch = audio_stream.get("channels", "unknown")
+        table.add_row("Sample Rate", f"{sr} Hz" if sr != "unknown" else sr)
+        table.add_row("Channels", str(ch))
 
-    if output_ext in {".mp4", ".mkv", ".mov", ".webm"}:
-        if (encoder_family or "").lower() == "nvidia":
-            return f'ffmpeg -i "{target_file}" -c:v h264_nvenc -preset fast -cq 28 -c:a aac -b:a 160k "{output}"'
-        return f'ffmpeg -i "{target_file}" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 160k "{output}"'
-
-    return f'ffmpeg -i "{target_file}" "{output}"'
-
-def _build_share_compress_fallback_command(query, target_file, encoder_family):
-    output_name = None
-    for ext in (".mp4", ".mkv", ".mov", ".webm", ".mp3", ".aac", ".wav"):
-        output_name = _extract_output_name_from_query(query, ext)
-        if output_name:
-            break
-    if not output_name:
-        output_name = _suggest_output_name(target_file, "share", ".mp4")
-
-    media_type = utils.get_media_type(target_file)
-    if media_type == "audio":
-        ext = Path(output_name).suffix.lower()
-        if ext == ".wav":
-            return f'ffmpeg -i "{target_file}" -vn -c:a pcm_s16le "{output_name}"'
-        if ext == ".aac":
-            return f'ffmpeg -i "{target_file}" -vn -c:a aac -b:a 160k "{output_name}"'
-        return f'ffmpeg -i "{target_file}" -vn -c:a libmp3lame -q:a 3 "{output_name}"'
-
-    vf_parts = []
-    ql = query.lower()
-    if "scale to 1080p" in ql:
-        vf_parts.append("scale=-2:1080")
-    elif "scale to 720p" in ql:
-        vf_parts.append("scale=-2:720")
-    if "use 60 fps" in ql:
-        vf_parts.append("fps=60")
-    elif "use 30 fps" in ql:
-        vf_parts.append("fps=30")
-    vf_opt = f' -vf "{",".join(vf_parts)}"' if vf_parts else ""
-
-    if "stronger compression" in ql:
-        cpu_quality = "-crf 28"
-        nv_quality = "-cq 32"
-    elif "higher-quality compression" in ql:
-        cpu_quality = "-crf 20"
-        nv_quality = "-cq 24"
-    else:
-        cpu_quality = "-crf 23"
-        nv_quality = "-cq 28"
-
-    if (encoder_family or "").lower() == "nvidia":
-        return (
-            f'ffmpeg -i "{target_file}"{vf_opt} '
-            f'-c:v h264_nvenc -preset fast {nv_quality} -c:a aac -b:a 160k "{output_name}"'
-        )
-    return (
-        f'ffmpeg -i "{target_file}"{vf_opt} '
-        f'-c:v libx264 -preset veryfast {cpu_quality} -c:a aac -b:a 160k "{output_name}"'
-    )
-
-def _build_deterministic_fallback_command(query, target_file, encoder_family):
-    ql = query.lower()
-    media_type = utils.get_media_type(target_file)
-
-    if "animated gif" in ql and media_type == "video":
-        return _build_gif_fallback_command(query, target_file)
-    if "webp" in ql and media_type == "image":
-        return _build_webp_fallback_command(query, target_file)
-    if "extract audio only" in ql and media_type == "video":
-        return _build_extract_audio_fallback_command(query, target_file)
-    if "remove audio from" in ql and media_type == "video":
-        return _build_remove_audio_fallback_command(query, target_file)
-    if "resize" in ql and media_type == "image":
-        return _build_resize_image_fallback_command(query, target_file)
-    if "convert" in ql and "save as" in ql:
-        converted = _build_change_format_fallback_command(query, target_file, encoder_family)
-        if converted:
-            return converted
-    if "compress" in ql and "save as" in ql:
-        return _build_share_compress_fallback_command(query, target_file, encoder_family)
-    return None
+    console.print(table)
+    console.print()
 
 
 def _render_welcome(args):
     dry_run_label = "ON" if args.dry_run else "OFF"
     ultra_safe_label = "ON" if args.ultra_safe else "OFF"
     
-    banner_large = r"""
+    banner = r"""
+[bold cyan]
   ____  _____  _____ _   _ __  __ _____ ____ ___    _    
  / __ \|  __ \|  ___| \ | |  \/  | ____|  _ \_ _|  / \   
 | |  | | |__) | |__ |  \| | |\/| |  _| | | | | |  / _ \  
@@ -730,23 +450,18 @@ def _render_welcome(args):
 | |   | |    | | 
 | |___| |___ | | 
  \____|_____|___|
-"""
-    banner_small = "[bold cyan]OPENMEDIA CLI v1.1.0[/]"
+[/]"""
 
     # Metasploit style stats
-    stats_lines = [
+    stats = [
         f"=[ [bold white]openmedia v1.1.0-stable[/] ]",
         f"+ -- --=[ [cyan]Model:[/] Qwen2.5-Coder:7B (Local/Ollama) ]",
         f"+ -- --=[ [cyan]Enablers:[/] FFmpeg, LangGraph, Rich ]",
         f"+ -- --=[ [cyan]System:[/] dry-run={dry_run_label}, ultra-safe={ultra_safe_label} ]",
     ]
     
-    if console.width < 70:
-        console.print(banner_small)
-    else:
-        console.print(Text(banner_large, style="bold cyan"))
-
-    for line in stats_lines:
+    console.print(banner)
+    for line in stats:
         console.print(line)
     console.print()
 
@@ -765,53 +480,48 @@ def _render_welcome(args):
 
 def main(argv=None):
     args = parse_args(argv)
-    
-    # Handle 'info' command
-    if args.command == "info":
-        if not Path(args.path).exists():
-            console.print(f"[bold red]X File not found:[/] {args.path}")
-            return
-        display_media_info(args.path)
-        return
-
     console.clear()
     _render_welcome(args)
 
     if not check_ollama():
         console.print("[bold red]X Ollama is not running. Please start Ollama first.[/]")
         return
-    
-    if not check_ollama_model_available():
+
+    if not utils.check_ollama_model():
         console.print(
-            "[bold yellow]⚠ Warning: Required model 'qwen2.5-coder:7b-instruct-q4_K_M' not found.[/]\n"
-            "[yellow]Run: ollama pull qwen2.5-coder:7b-instruct-q4_K_M[/]"
+            "[yellow]⚠ Model 'qwen2.5-coder:7b-instruct-q4_K_M' not found in Ollama.\n"
+            "  Run: ollama pull qwen2.5-coder:7b-instruct-q4_K_M[/]"
         )
-        if not questionary.confirm("Continue anyway?", style=OM_STYLE, default=False).ask():
-            return
 
     if args.settings:
         open_settings_menu()
         return
 
-    target_file = _select_target_file()
-    if not target_file:
-        return
+    # ── Outer loop: allows the user to go back from task selection
+    #    to file selection.
+    while True:
+        console.print(Panel("[bold]Step 1/3: Media Selection[/]", style="on grey23", border_style="bright_black"))
+        target_file = _select_target_file()
+        if not target_file:
+            return
 
-    # Show technical info table before asking for request
-    display_media_info(target_file)
-    console.print()
+        _display_media_info(target_file)
 
-    query = _collect_user_request(target_file)
-    if not query:
-        return
+        console.print(Panel("[bold]Step 2/3: Transformation Task[/]", style="on grey23", border_style="bright_black"))
+        query = _collect_user_request(target_file)
+        if not query:
+            return
+        if query == _BACK_TO_FILE_SELECT:
+            console.print("[dim]Returning to file selection…[/]\n")
+            continue
+        break  # user picked a valid task — proceed
 
     console.print(
         Panel(
             f"[bold]Selected file:[/] {target_file}\n[bold]Requested edit:[/] {query}",
-            title="Review Request",
+            title="Step 3/3: Review",
             border_style="blue",
-            style="on grey23",
-            expand=False
+            style="on grey23"
         )
     )
 
@@ -828,7 +538,7 @@ def main(argv=None):
         return
 
     console.print(
-        f"[cyan]Ollama inference mode: {llm_effective_mode.upper()} "
+        f"[cyan]Ollama inference mode: {(llm_effective_mode or 'cpu').upper()} "
         "(model unloads after each generation).[/]"
     )
     if args.ultra_safe:
@@ -864,7 +574,6 @@ def main(argv=None):
                 f"[yellow]{prepared_cmd}[/]",
                 title="[bold green]AI Recommended Command[/]",
                 subtitle=f"Generated in {final_state['iteration_count']} attempt(s)",
-                expand=False
             )
         )
 
@@ -882,7 +591,7 @@ def main(argv=None):
         if questionary.confirm("Execute this command?", style=OM_STYLE).ask():
             with console.status("[bold blue]Rendering media via FFmpeg...[/]"):
                 success, msg = executor.run_ffmpeg(
-                    cmd,
+                    prepared_cmd,
                     query,
                     effective_encoder_family,
                     target_file,
@@ -893,114 +602,158 @@ def main(argv=None):
                 console.print("[bold green]Success: Process complete.[/]")
             else:
                 console.print(f"[bold red]FFmpeg Error:[/]\n{msg}")
-                fallback_cmd = _build_deterministic_fallback_command(
-                    query, target_file, effective_encoder_family
-                )
-                if fallback_cmd and fallback_cmd.strip() != cmd.strip():
-                    audited_fallback = _audit_command_for_execution(
-                        fallback_cmd,
-                        query,
-                        target_file,
-                        media_context,
-                        effective_encoder_family,
-                    )
-                    if audited_fallback.is_valid and audited_fallback.generated_command:
-                        safe_fallback_cmd = audited_fallback.generated_command
-                        prepared_fallback, _ = executor.prepare_command_for_safe_execution(
-                            safe_fallback_cmd, effective_encoder_family, target_file, args.ultra_safe
-                        )
-                        console.print(
-                            Panel(
-                                f"[yellow]{prepared_fallback}[/]",
-                                title="[bold yellow]Deterministic Fallback Available[/]",
-                                subtitle="Primary command failed; fallback is generated from preset intent",
-                                expand=False,
-                            )
-                        )
-                        if questionary.confirm("Retry using fallback command?", style=OM_STYLE).ask():
-                            with console.status("[bold blue]Rendering media via FFmpeg (fallback)...[/]"):
-                                fb_success, fb_msg = executor.run_ffmpeg(
-                                    safe_fallback_cmd,
-                                    query,
-                                    effective_encoder_family,
-                                    target_file,
-                                    args.ultra_safe,
-                                )
-                            if fb_success:
-                                console.print("[bold green]Success: Process complete via fallback.[/]")
-                            else:
-                                console.print(f"[bold red]Fallback FFmpeg Error:[/]\n{fb_msg}")
-                    else:
-                        reason = audited_fallback.error_message or "Fallback failed safety validation."
-                        console.print(f"[bold red]Fallback blocked by safety checks:[/]\n{reason}")
     else:
-        fallback_cmd = None
-        if target_file and query:
-            fallback_cmd = _build_deterministic_fallback_command(
-                query, target_file, effective_encoder_family
-            )
-
-        if fallback_cmd:
-            audited_fallback = _audit_command_for_execution(
-                fallback_cmd,
-                query,
-                target_file,
-                media_context,
-                effective_encoder_family,
-            )
-            if not audited_fallback.is_valid or not audited_fallback.generated_command:
-                reason = audited_fallback.error_message or "Fallback failed safety validation."
-                console.print(f"[bold red]Fallback blocked by safety checks:[/]\n{reason}")
-                return
-
-            safe_fallback_cmd = audited_fallback.generated_command
-            prepared_fallback, was_tuned = executor.prepare_command_for_safe_execution(
-                safe_fallback_cmd, effective_encoder_family, target_file, args.ultra_safe
-            )
-            console.print(
-                Panel(
-                    f"[yellow]{prepared_fallback}[/]",
-                    title="[bold yellow]Fallback Command[/]",
-                    subtitle="LLM command retries were unsafe; using deterministic fallback",
-                    expand=False
-                )
-            )
-
-            if was_tuned:
-                console.print(
-                    "[cyan]Safety mode adjusted naming/encoder/thread settings for smoother execution.[/]"
-                )
-
-            if args.dry_run:
-                console.print(
-                    "[cyan]Dry-run mode enabled: fallback command was prepared but not executed.[/]"
-                )
-                return
-
-            if questionary.confirm("Execute fallback command?", style=OM_STYLE).ask():
-                with console.status("[bold blue]Rendering media via FFmpeg...[/]"):
-                    success, msg = executor.run_ffmpeg(
-                        safe_fallback_cmd,
-                        query,
-                        effective_encoder_family,
-                        target_file,
-                        args.ultra_safe,
-                    )
-
-                if success:
-                    console.print("[bold green]Success: Process complete.[/]")
-                else:
-                    console.print(f"[bold red]FFmpeg Error:[/]\n{msg}")
-            return
-
         error = final_state.get("error_message", "Unknown logic error.")
         console.print(
             Panel(
                 f"[bold red]Agent failed to generate a safe command:[/]\n{error}",
                 title="Process Failed",
-                expand=False
             )
         )
+
+        # --- Deterministic fallback: try a hardcoded command ---
+        fallback_cmd = _build_deterministic_fallback_command(
+            query, target_file, effective_encoder_family
+        )
+        if fallback_cmd:
+            console.print("[cyan]Attempting deterministic fallback command...[/]")
+            audited = _audit_command_for_execution(
+                fallback_cmd, query, target_file, media_context, effective_encoder_family
+            )
+            if audited.is_valid and audited.generated_command:
+                prepared_fb, fb_tuned = executor.prepare_command_for_safe_execution(
+                    audited.generated_command, effective_encoder_family, target_file, args.ultra_safe
+                )
+                console.print(
+                    Panel(
+                        f"[yellow]{prepared_fb}[/]",
+                        title="[bold cyan]Fallback Command[/]",
+                        subtitle="Generated without LLM",
+                    )
+                )
+                if not args.dry_run and questionary.confirm(
+                    "Execute this fallback command?", style=OM_STYLE
+                ).ask():
+                    with console.status("[bold blue]Rendering media via FFmpeg...[/]"):
+                        success, msg = executor.run_ffmpeg(
+                            prepared_fb, query, effective_encoder_family,
+                            target_file, args.ultra_safe,
+                        )
+                    if success:
+                        console.print("[bold green]Success: Process complete.[/]")
+                    else:
+                        console.print(f"[bold red]FFmpeg Error:[/]\n{msg}")
+
+
+def _extract_output_name_from_query(query):
+    """Extracts 'save as <name>' from a user query, returns the name or None."""
+    lower = query.lower()
+    marker = "save as "
+    idx = lower.find(marker)
+    if idx == -1:
+        return None
+    rest = query[idx + len(marker):].strip().rstrip(".")
+    return rest.split()[0] if rest else None
+
+
+def _build_deterministic_fallback_command(query, target_file, encoder_family):
+    """
+    Builds a deterministic (non-LLM) FFmpeg command for common tasks.
+    Returns None if the query doesn't match any known pattern.
+    """
+    lower = query.lower()
+    output_name = _extract_output_name_from_query(query)
+    family = (encoder_family or "").lower()
+
+    # --- Extract audio only ---
+    if "extract audio" in lower or ("extract" in lower and "audio" in lower):
+        if not output_name:
+            stem = Path(target_file).stem
+            output_name = f"{stem}_audio.mp3"
+        ext = Path(output_name).suffix.lower()
+        if ext in (".mp3",):
+            return f'ffmpeg -i "{target_file}" -vn -c:a libmp3lame -q:a 2 "{output_name}"'
+        if ext in (".aac",):
+            return f'ffmpeg -i "{target_file}" -vn -c:a aac -b:a 192k "{output_name}"'
+        if ext in (".wav",):
+            return f'ffmpeg -i "{target_file}" -vn -c:a pcm_s16le "{output_name}"'
+        return f'ffmpeg -i "{target_file}" -vn -c:a libmp3lame -q:a 2 "{output_name}"'
+
+    # --- Remove audio ---
+    if "remove audio" in lower or "mute" in lower:
+        if not output_name:
+            stem = Path(target_file).stem
+            suffix = Path(target_file).suffix or ".mp4"
+            output_name = f"{stem}_muted{suffix}"
+        if family == "nvidia":
+            return f'ffmpeg -i "{target_file}" -an -c:v h264_nvenc -preset fast -cq 28 "{output_name}"'
+        return f'ffmpeg -i "{target_file}" -an -c:v libx264 -preset veryfast -crf 23 "{output_name}"'
+
+    # --- GIF to WebP (lossless) ---
+    if "webp" in lower and ("lossless" in lower or "perfect" in lower):
+        if not output_name:
+            stem = Path(target_file).stem
+            output_name = f"{stem}_optimized.webp"
+        return f'ffmpeg -i "{target_file}" -c:v libwebp -lossless 1 "{output_name}"'
+
+    # --- Compress / share ---
+    if "compress" in lower or "sharing" in lower:
+        if not output_name:
+            stem = Path(target_file).stem
+            output_name = f"{stem}_share.mp4"
+
+        vf_parts = []
+        if "720p" in lower:
+            vf_parts.append("scale=-2:720")
+        elif "1080p" in lower:
+            vf_parts.append("scale=-2:1080")
+        if "30 fps" in lower:
+            vf_parts.append("fps=30")
+        elif "60 fps" in lower:
+            vf_parts.append("fps=60")
+
+        vf_str = f' -vf "{",".join(vf_parts)}"' if vf_parts else ""
+
+        if family == "nvidia":
+            return f'ffmpeg -i "{target_file}"{vf_str} -c:v h264_nvenc -preset fast -cq 28 -c:a aac -b:a 128k "{output_name}"'
+        return f'ffmpeg -i "{target_file}"{vf_str} -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "{output_name}"'
+
+    # --- Format conversion (audio) ---
+    if "convert" in lower:
+        if output_name:
+            ext = Path(output_name).suffix.lower()
+            if ext == ".mp3":
+                return f'ffmpeg -i "{target_file}" -c:a libmp3lame -q:a 2 "{output_name}"'
+            if ext == ".aac":
+                return f'ffmpeg -i "{target_file}" -c:a aac -b:a 192k "{output_name}"'
+            if ext == ".wav":
+                return f'ffmpeg -i "{target_file}" -c:a pcm_s16le "{output_name}"'
+            # Video format conversion
+            if family == "nvidia":
+                return f'ffmpeg -i "{target_file}" -c:v h264_nvenc -preset fast -cq 28 -c:a aac "{output_name}"'
+            return f'ffmpeg -i "{target_file}" -c:v libx264 -preset veryfast -crf 23 -c:a aac "{output_name}"'
+
+    return None
+
+
+def _audit_command_for_execution(command, user_input, target_file, media_context, encoder_family):
+    """
+    Runs the safety pipeline (validator → reviewer) on a pre-built command.
+    Returns the final AgentState.
+    """
+    state = AgentState(
+        user_input=user_input,
+        target_file=target_file,
+        media_context=media_context,
+        effective_encoder_family=encoder_family,
+        generated_command=command,
+        is_valid=True,  # assume valid, let validator decide
+    )
+    state = validator_node(state)
+    if not state.is_valid:
+        return state
+    state = safety_reviewer_node(state)
+    return state
 
 
 if __name__ == "__main__":
