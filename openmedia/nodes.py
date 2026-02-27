@@ -19,6 +19,9 @@ FORBIDDEN_TOKENS = {
 }
 SHELL_OPERATORS = {"|", "||", "&&", ";", "&"}
 REDIRECTION_PREFIXES = (">", "<", "1>", "2>", ">>")
+# NOTE: These extension sets and _tokenize_command() are intentionally duplicated
+# from executor.py. The validator (nodes.py) and executor (executor.py) are
+# separate layers — merging them would create a circular import.
 VIDEO_OUTPUT_EXTENSIONS = {
     ".mp4",
     ".mkv",
@@ -120,32 +123,129 @@ def generator_node(state: AgentState):
     """Generates the FFmpeg command using the local Ollama model."""
     print(f"[Brain] Thinking... (Attempt {state.iteration_count + 1})")
     
-    prompt = f"""Target File: {state.target_file}
+    prompt = f"""You are an expert FFmpeg command generator. Output ONLY one raw FFmpeg command on a single line.
+
+=== CONTEXT ===
+Target File: {state.target_file}
 Media Info: {state.media_context if state.media_context else 'Unavailable'}
 User Request: {state.user_input}
 Last Error: {state.error_message if state.error_message else 'None'}
 Ultra Safe Mode: {state.ultra_safe}
-Encoding Preference: {state.encoding_preference if state.encoding_preference else 'auto'}
-LLM Runtime Preference: {state.llm_runtime_mode if state.llm_runtime_mode else 'auto'}
-LLM Effective Runtime: {state.llm_effective_mode if state.llm_effective_mode else 'cpu'}
 Effective Encoder Family: {state.effective_encoder_family if state.effective_encoder_family else 'cpu'}
 Preferred Video Encoder: {state.preferred_video_encoder if state.preferred_video_encoder else 'libx264'}
 NVENC Available: {state.nvenc_available if state.nvenc_available is not None else 'unknown'}
 
-Task: Output ONLY one raw FFmpeg command on a single line.
-Rules:
+=== FFMPEG COMMAND REFERENCE (use these as templates) ===
+
+# Compress video for sharing (CPU)
+ffmpeg -i "INPUT" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "OUTPUT.mp4"
+
+# Compress video for sharing (NVIDIA GPU)
+ffmpeg -i "INPUT" -c:v h264_nvenc -preset fast -cq 28 -c:a aac -b:a 128k "OUTPUT.mp4"
+
+# Compress + scale to 720p + 30fps (CPU)
+ffmpeg -i "INPUT" -vf "scale=-2:720,fps=30" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "OUTPUT.mp4"
+
+# Compress + scale to 720p + 30fps (NVIDIA GPU)
+ffmpeg -i "INPUT" -vf "scale=-2:720,fps=30" -c:v h264_nvenc -preset fast -cq 28 -c:a aac -b:a 128k "OUTPUT.mp4"
+
+# Compress + scale to 1080p (CPU)
+ffmpeg -i "INPUT" -vf "scale=-2:1080" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k "OUTPUT.mp4"
+
+# Higher quality compression (CPU, lower CRF = bigger file, better quality)
+ffmpeg -i "INPUT" -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "OUTPUT.mp4"
+
+# Stronger compression / smaller file (CPU, higher CRF)
+ffmpeg -i "INPUT" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k "OUTPUT.mp4"
+
+# Extract audio as MP3
+ffmpeg -i "INPUT" -vn -c:a libmp3lame -q:a 2 "OUTPUT.mp3"
+
+# Extract audio as AAC
+ffmpeg -i "INPUT" -vn -c:a aac -b:a 192k "OUTPUT.aac"
+
+# Extract audio as WAV (lossless)
+ffmpeg -i "INPUT" -vn -c:a pcm_s16le "OUTPUT.wav"
+
+# Remove audio from video (CPU)
+ffmpeg -i "INPUT" -an -c:v libx264 -preset veryfast -crf 23 "OUTPUT.mp4"
+
+# Remove audio from video (NVIDIA GPU)
+ffmpeg -i "INPUT" -an -c:v h264_nvenc -preset fast -cq 28 "OUTPUT.mp4"
+
+# Convert to MKV (CPU)
+ffmpeg -i "INPUT" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mkv"
+
+# Convert to WebM (always CPU, VP9)
+ffmpeg -i "INPUT" -c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus -b:a 128k "OUTPUT.webm"
+
+# Convert to MOV (CPU)
+ffmpeg -i "INPUT" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mov"
+
+# Make GIF with high quality palette (CORRECT single-pass method)
+ffmpeg -i "INPUT" -filter_complex "fps=15,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "OUTPUT.gif"
+
+# Make GIF with custom fps and size
+ffmpeg -i "INPUT" -filter_complex "fps=10,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "OUTPUT.gif"
+
+# Make GIF from specific time range (e.g. 5 seconds starting at 00:00:10)
+ffmpeg -ss 00:00:10 -t 5 -i "INPUT" -filter_complex "fps=15,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" "OUTPUT.gif"
+
+# Extract a single frame as PNG (high quality)
+ffmpeg -i "INPUT" -vf "select=eq(n\\,0)" -frames:v 1 "OUTPUT.png"
+
+# Extract frame at specific timestamp as PNG
+ffmpeg -ss 00:00:05 -i "INPUT" -frames:v 1 "OUTPUT.png"
+
+# Extract frame at specific timestamp as JPG
+ffmpeg -ss 00:00:05 -i "INPUT" -frames:v 1 -q:v 2 "OUTPUT.jpg"
+
+# GIF to WebP (lossless, perfect quality)
+ffmpeg -i "INPUT" -c:v libwebp -lossless 1 "OUTPUT.webp"
+
+# GIF to WebP (lossy, smaller file)
+ffmpeg -i "INPUT" -c:v libwebp -quality 80 "OUTPUT.webp"
+
+# Trim/cut video (CPU, from 00:00:30 for 60 seconds)
+ffmpeg -ss 00:00:30 -t 60 -i "INPUT" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mp4"
+
+# Trim/cut video (NVIDIA GPU)
+ffmpeg -ss 00:00:30 -t 60 -i "INPUT" -c:v h264_nvenc -preset fast -cq 28 -c:a aac "OUTPUT.mp4"
+
+# Speed up video 2x (CPU)
+ffmpeg -i "INPUT" -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" -c:v libx264 -preset veryfast -crf 23 "OUTPUT.mp4"
+
+# Slow down video 0.5x (CPU)
+ffmpeg -i "INPUT" -filter_complex "[0:v]setpts=2.0*PTS[v];[0:a]atempo=0.5[a]" -map "[v]" -map "[a]" -c:v libx264 -preset veryfast -crf 23 "OUTPUT.mp4"
+
+# Rotate video 90 degrees clockwise (CPU)
+ffmpeg -i "INPUT" -vf "transpose=1" -c:v libx264 -preset veryfast -crf 23 -c:a copy "OUTPUT.mp4"
+
+# Add fade-in (first 2 seconds) and fade-out (last 2 seconds, assuming 30s video)
+ffmpeg -i "INPUT" -vf "fade=t=in:st=0:d=2,fade=t=out:st=28:d=2" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mp4"
+
+# Resize to exact dimensions
+ffmpeg -i "INPUT" -vf "scale=1280:720" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mp4"
+
+# Resize keeping aspect ratio (width 1280, auto height)
+ffmpeg -i "INPUT" -vf "scale=1280:-2" -c:v libx264 -preset veryfast -crf 23 -c:a aac "OUTPUT.mp4"
+
+=== RULES ===
 - Start with ffmpeg.
 - Output must be a single line with no newlines or line breaks.
 - Output exactly one ffmpeg invocation (never chain multiple ffmpeg commands).
 - Do not include shell chaining, redirection, scripts, or non-ffmpeg utilities.
 - Do not wrap the command in markdown code blocks or backticks.
-- If effective encoder family is 'nvidia', use h264_nvenc or hevc_nvenc for video.
-- For GIF/image outputs, do not use NVENC-only flags (-cq/-crf with nvenc); prefer a single ffmpeg filter_complex pipeline.
-- For GIF outputs, use one input and one command; if you use palettegen you must also use paletteuse in the same filter graph.
-- In nvidia mode, prefer -cq for quality control and avoid x264-only presets like veryfast/superfast.
-- If effective encoder family is 'cpu', use libx264 for video with a moderate preset (prefer veryfast).
-- Avoid very CPU-heavy presets such as slow, slower, veryslow, or placebo.
-- If ultra safe mode is true, prefer lower-resource settings and avoid aggressive quality settings."""
+- Replace INPUT/OUTPUT placeholders with the actual file paths from the context above.
+- If effective encoder family is 'nvidia', use h264_nvenc or hevc_nvenc for video output (mp4/mkv/mov).
+- For GIF/image/webp/audio outputs, do NOT use NVENC — use the appropriate software encoder from the reference above.
+- For GIF outputs, ALWAYS use the single-pass split/palettegen/paletteuse filter_complex pattern shown above.
+- In nvidia mode, use -cq for quality (not -crf). Avoid x264-only presets like veryfast/superfast.
+- If effective encoder family is 'cpu', use libx264 with preset veryfast.
+- Avoid heavy CPU presets: slow, slower, veryslow, placebo.
+- If ultra safe mode is true, prefer lower-resource settings.
+- Use -2 instead of -1 for auto-calculated scale dimensions (ensures even pixel counts).
+- Pick the closest matching template from the reference above and adapt it to the user's request."""
 
     try:
         ollama_options = {}
@@ -376,22 +476,23 @@ def safety_reviewer_node(state: AgentState):
     print(f"[Safety Review] Auditing command for hidden risks...")
     
     audit_prompt = f"""
-    You are a Senior Security Engineer and FFmpeg expert.
-    
-    User Intent: {state.user_input}
-    Generated Command: {state.generated_command}
-    Media Context: {state.media_context}
-    Effective Encoder: {state.effective_encoder_family}
-    
-    Analyze the command for:
-    1. Malicious intent (hidden shell escapes, file deletions, system calls).
-    2. Side effects (overwriting important files outside of the output name).
-    3. Technical correctness (does it actually do what the user asked?).
-    
-    Rules:
-    - If it is 100% safe and correct, output ONLY 'APPROVED'.
-    - If it is dangerous or incorrect, output 'REJECTED: [reason]'.
-    """
+You are a Security Auditor. Your ONLY job is to check if this FFmpeg command is SAFE to run on the user's system.
+
+Generated Command: {state.generated_command}
+Target File: {state.target_file}
+Media Context: {state.media_context}
+
+Check ONLY these security concerns:
+1. Does the command contain hidden shell escapes, file deletions, or system calls?
+2. Does the command overwrite or delete files other than the intended output?
+3. Does the command access suspicious paths, network resources, or system directories?
+4. Does the command chain multiple programs or use shell operators (&&, ||, |, ;)?
+
+IMPORTANT: Do NOT judge technical correctness. Do NOT evaluate whether the FFmpeg filters, codecs, or encoding settings are optimal or will produce the best result. That is NOT your job. You are ONLY checking for security risks.
+
+If the command is safe to execute, output ONLY the word: APPROVED
+If the command is dangerous, output: REJECTED: [security reason]
+"""
 
     try:
         response = requests.post(
