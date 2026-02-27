@@ -4,6 +4,9 @@ import subprocess
 from pathlib import Path
 from openmedia.utils import log_command
 
+# NOTE: These extension sets and _tokenize_command() are intentionally duplicated
+# from nodes.py. The validator (nodes.py) and executor (executor.py) are
+# separate layers — merging them would create a circular import.
 VIDEO_OUTPUT_EXTENSIONS = {
     ".mp4",
     ".mkv",

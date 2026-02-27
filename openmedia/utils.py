@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+MEDIA_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
 CONFIG_FILE = Path.home() / ".openmedia_config.json"
 
 def get_media_type(file_path):
@@ -44,7 +44,7 @@ def format_bitrate(bitrate_bps):
 
 def get_local_media_files():
     """Returns a list of media files in the current working directory."""
-    return [f for f in os.listdir('.') if f.lower().endswith(VIDEO_EXTENSIONS)]
+    return [f for f in os.listdir('.') if f.lower().endswith(MEDIA_EXTENSIONS)]
 
 def find_best_match(user_query, files):
     """Finds if a specific filename is mentioned in the user's natural language query."""

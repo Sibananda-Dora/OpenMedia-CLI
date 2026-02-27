@@ -20,12 +20,9 @@ def create_agent():
         if state.is_valid:
             return END
         if state.iteration_count >= 3:
-            # Add clear error message when max iterations reached
-            if not state.error_message or "failed after" not in state.error_message.lower():
-                state.error_message = (
-                    f"Agent failed after {state.iteration_count} attempts. "
-                    f"Last error: {state.error_message or 'Unable to generate valid command'}"
-                )
+            # Max retries exhausted – return END and let the CLI display
+            # the last error_message. Do NOT mutate state here; routers
+            # should only return routing decisions.
             return END
         return "planner"
 
