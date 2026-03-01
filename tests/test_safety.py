@@ -200,6 +200,17 @@ class SafetyPipelineTests(unittest.TestCase):
         self.assertFalse(out.is_valid)
         self.assertIn("shell", out.error_message.lower())
 
+    def test_validator_rejects_input_output_path_collision(self):
+        state = AgentState(
+            user_input="convert",
+            target_file="input.mp4",
+            effective_encoder_family="cpu",
+            generated_command="ffmpeg -i input.mp4 input.mp4",
+        )
+        out = validator_node(state)
+        self.assertFalse(out.is_valid)
+        self.assertIn("input and output paths must be different", out.error_message.lower())
+
     @patch("openmedia.nodes.requests.post")
     def test_safety_reviewer_requires_exact_approved(self, mock_post):
         mock_response = Mock()
