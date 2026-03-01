@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,7 +24,10 @@ MEDIA_EXTENSIONS = (
     ".gif",
     ".bmp",
 )
-CONFIG_FILE = Path.home() / ".openmedia_config.json"
+APP_DIR = Path.home() / ".openmedia"
+LOG_DIR = APP_DIR / "logs"
+CONFIG_FILE = APP_DIR / "config.json"
+LEGACY_CONFIG_FILE = Path.home() / ".openmedia_config.json"
 
 def get_media_type(file_path):
     """Categorizes a file based on its extension."""
@@ -74,21 +78,34 @@ def find_best_match(user_query, files):
 
 def load_config():
     """Loads persistent user config from disk."""
-    if not CONFIG_FILE.exists():
+    config_path = CONFIG_FILE if CONFIG_FILE.exists() else LEGACY_CONFIG_FILE
+    if not config_path.exists():
         return {}
     try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        return json.loads(config_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
+def ensure_log_dir():
+    """Ensures the application log directory exists."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    return LOG_DIR
+
+def get_log_path(file_name):
+    """Returns an absolute path inside the OpenMedia log directory."""
+    return ensure_log_dir() / file_name
+
 def save_config(config):
     """Saves persistent user config to disk."""
+    APP_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 def clear_config():
     """Clears persistent user config from disk."""
     if CONFIG_FILE.exists():
         CONFIG_FILE.unlink()
+    if LEGACY_CONFIG_FILE.exists():
+        LEGACY_CONFIG_FILE.unlink()
 
 def get_encoding_preference():
     """
@@ -188,19 +205,18 @@ def build_media_context(file_path):
     )
 
 def log_command(user_prompt, generated_command, status="SUCCESS"):
-    """Saves the command history to a local text file."""
-    log_file = "history.log"
+    """Appends command execution history in JSONL format."""
+    log_file = get_log_path("history.jsonl")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    log_entry = (
-        f"[{timestamp}] STATUS: {status}\n"
-        f"PROMPT: {user_prompt}\n"
-        f"COMMAND: {generated_command}\n"
-        f"{'-'*50}\n"
-    )
-    
+    log_entry = {
+        "timestamp": timestamp,
+        "status": status,
+        "prompt": user_prompt,
+        "command": generated_command,
+    }
+
     with open(log_file, "a", encoding="utf-8") as f:
-        f.write(log_entry)
+        f.write(json.dumps(log_entry, ensure_ascii=True) + "\n")
 
 def check_ollama_model(model_name="qwen2.5-coder:7b-instruct-q4_K_M"):
     """Checks if a specific Ollama model is available."""
@@ -212,3 +228,10 @@ def check_ollama_model(model_name="qwen2.5-coder:7b-instruct-q4_K_M"):
         return any(model_name in m.get("name", "") for m in models)
     except Exception:
         return False
+
+def check_environment():
+    """
+    Returns a list of required tools missing from PATH.
+    """
+    required = ["ffmpeg", "ffprobe", "ollama"]
+    return [dep for dep in required if shutil.which(dep) is None]
