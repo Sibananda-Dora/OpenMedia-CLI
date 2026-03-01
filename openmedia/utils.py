@@ -4,7 +4,25 @@ import os
 import subprocess
 from pathlib import Path
 
-MEDIA_EXTENSIONS = ('.mp4', '.mkv', '.mov', '.avi', '.mp3', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+MEDIA_EXTENSIONS = (
+    ".mp4",
+    ".mkv",
+    ".mov",
+    ".avi",
+    ".webm",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".m4a",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+)
 CONFIG_FILE = Path.home() / ".openmedia_config.json"
 
 def get_media_type(file_path):

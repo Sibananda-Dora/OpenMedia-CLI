@@ -1,4 +1,5 @@
 import argparse
+import re
 from pathlib import Path
 import questionary
 import requests
@@ -54,7 +55,7 @@ def check_ollama():
     try:
         requests.get("http://localhost:11434/", timeout=2)
         return True
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.RequestException:
         return False
 
 
@@ -136,7 +137,7 @@ def _resolve_encoding_mode():
     return encoding_preference, effective_encoder_family, nvenc_available
 
 
-def _resolve_llm_mode(effective_encoder_family, nvenc_available):
+def _resolve_llm_mode(nvenc_available):
     llm_runtime_mode = utils.get_llm_runtime_mode()
     if llm_runtime_mode not in {"auto", "gpu", "cpu"}:
         llm_runtime_mode = None
@@ -153,11 +154,9 @@ def _resolve_llm_mode(effective_encoder_family, nvenc_available):
 
     llm_effective_mode = llm_runtime_mode
     if llm_runtime_mode == "auto":
-        # NOTE: Using NVENC availability as a heuristic for GPU LLM capability.
-        # NVENC is a video encoder and doesn't directly indicate whether the GPU
-        # can run Ollama inference, but it's the best proxy we have without
-        # querying Ollama's GPU status directly.
-        llm_effective_mode = "cpu" if effective_encoder_family == "nvidia" else "gpu"
+        # Use NVENC detection as a pragmatic GPU capability signal.
+        # If we cannot detect NVIDIA support, default to CPU for stability.
+        llm_effective_mode = "gpu" if nvenc_available else "cpu"
     elif llm_runtime_mode == "gpu" and not nvenc_available:
         console.print(
             "[yellow]GPU mode requested for Ollama but no NVIDIA GPU support detected. "
@@ -531,9 +530,7 @@ def main(argv=None):
 
     preferred_video_encoder = "h264_nvenc" if effective_encoder_family == "nvidia" else "libx264"
 
-    llm_runtime_mode, llm_effective_mode = _resolve_llm_mode(
-        effective_encoder_family, nvenc_available
-    )
+    llm_runtime_mode, llm_effective_mode = _resolve_llm_mode(nvenc_available)
     if not llm_runtime_mode:
         return
 
@@ -647,13 +644,16 @@ def main(argv=None):
 
 def _extract_output_name_from_query(query):
     """Extracts 'save as <name>' from a user query, returns the name or None."""
-    lower = query.lower()
-    marker = "save as "
-    idx = lower.find(marker)
-    if idx == -1:
+    match = re.search(
+        r"\bsave as\s+(?:\"([^\"]+)\"|'([^']+)'|([^\n]+))",
+        query,
+        flags=re.IGNORECASE,
+    )
+    if not match:
         return None
-    rest = query[idx + len(marker):].strip().rstrip(".")
-    return rest.split()[0] if rest else None
+    raw_name = next((part for part in match.groups() if part), "")
+    candidate = raw_name.strip().rstrip(" .,:;!?")
+    return candidate or None
 
 
 def _build_deterministic_fallback_command(query, target_file, encoder_family):
@@ -664,6 +664,8 @@ def _build_deterministic_fallback_command(query, target_file, encoder_family):
     lower = query.lower()
     output_name = _extract_output_name_from_query(query)
     family = (encoder_family or "").lower()
+    video_output_exts = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
+    image_output_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 
     # --- Extract audio only ---
     if "extract audio" in lower or ("extract" in lower and "audio" in lower):
@@ -728,10 +730,15 @@ def _build_deterministic_fallback_command(query, target_file, encoder_family):
                 return f'ffmpeg -i "{target_file}" -c:a aac -b:a 192k "{output_name}"'
             if ext == ".wav":
                 return f'ffmpeg -i "{target_file}" -c:a pcm_s16le "{output_name}"'
-            # Video format conversion
-            if family == "nvidia":
+            if ext in image_output_exts:
+                # Deterministic fallback intentionally avoids image conversion
+                # heuristics to prevent wrong or surprising outputs.
+                return None
+            if ext in video_output_exts and family == "nvidia":
                 return f'ffmpeg -i "{target_file}" -c:v h264_nvenc -preset fast -cq 28 -c:a aac "{output_name}"'
-            return f'ffmpeg -i "{target_file}" -c:v libx264 -preset veryfast -crf 23 -c:a aac "{output_name}"'
+            if ext in video_output_exts:
+                return f'ffmpeg -i "{target_file}" -c:v libx264 -preset veryfast -crf 23 -c:a aac "{output_name}"'
+            return None
 
     return None
 
