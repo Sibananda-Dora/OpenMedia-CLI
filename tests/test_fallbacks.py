@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from openmedia.cli_frontend import (
+    _extract_output_name_from_query,
     _audit_command_for_execution,
     _build_deterministic_fallback_command,
 )
@@ -9,6 +10,16 @@ from openmedia.state import AgentState
 
 
 class DeterministicFallbackTests(unittest.TestCase):
+    def test_extract_output_name_supports_spaces(self):
+        query = "Compress clip.mp4 for sharing and save as my final output.mp4."
+        name = _extract_output_name_from_query(query)
+        self.assertEqual(name, "my final output.mp4")
+
+    def test_extract_output_name_supports_quoted_filename(self):
+        query = 'Convert input.mov to MP4 and save as "project export v2.mp4".'
+        name = _extract_output_name_from_query(query)
+        self.assertEqual(name, "project export v2.mp4")
+
     def test_webp_lossless_fallback(self):
         query = (
             "Convert sample.gif to Lossless (Perfect Quality) WebP format for web optimization. "
@@ -54,6 +65,11 @@ class DeterministicFallbackTests(unittest.TestCase):
         self.assertIsNotNone(cmd)
         self.assertIn("libmp3lame", cmd)
         self.assertIn("input_converted.mp3", cmd)
+
+    def test_change_format_image_fallback_returns_none(self):
+        query = "Convert input.mp4 to PNG. Save as frame capture.png."
+        cmd = _build_deterministic_fallback_command(query, "input.mp4", "cpu")
+        self.assertIsNone(cmd)
 
     @patch("openmedia.cli_frontend.safety_reviewer_node")
     @patch("openmedia.cli_frontend.validator_node")
