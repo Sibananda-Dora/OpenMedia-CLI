@@ -1,3 +1,4 @@
+# DON'T USE IT YET !!
 # OpenMedia CLI
 
 OpenMedia is a local CLI that converts natural-language media requests into FFmpeg commands using Ollama, validates them, and optionally executes them.
@@ -13,6 +14,8 @@ This project is still evolving. Safety and UX are actively being improved.
 - Optional LLM safety review pass
 - CPU/NVIDIA-aware execution tuning
 - Deterministic fallback commands for common operations
+- Startup dependency health check (`ffmpeg`, `ffprobe`, `ollama`)
+- Logs stored in `~/.openmedia/logs`
 
 ## Requirements
 
