@@ -476,11 +476,26 @@ def _render_welcome(args):
     console.print(Panel(instructions, border_style="bright_black", expand=False))
     console.print()
 
+def _render_missing_dependency_panel(missing_deps):
+    deps = ", ".join(missing_deps)
+    message = (
+        "[bold red]Missing required system tools[/]\n\n"
+        f"[white]{deps}[/]\n\n"
+        "Install them and ensure they are available on PATH, then re-run OpenMedia.\n"
+        "[dim]Required: ffmpeg, ffprobe, ollama[/]"
+    )
+    console.print(Panel(message, title="Environment Check Failed", border_style="red", expand=False))
+
 
 def main(argv=None):
     args = parse_args(argv)
     console.clear()
     _render_welcome(args)
+
+    missing_deps = utils.check_environment()
+    if missing_deps:
+        _render_missing_dependency_panel(missing_deps)
+        return
 
     if not check_ollama():
         console.print("[bold red]X Ollama is not running. Please start Ollama first.[/]")
