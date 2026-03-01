@@ -212,6 +212,7 @@ ffmpeg -i "INPUT" -vf "scale=1280:-2" -c:v libx264 -preset veryfast -crf 23 -c:a
 - Replace INPUT/OUTPUT placeholders with the actual file paths from the context above.
 - If effective encoder family is 'nvidia', use h264_nvenc or hevc_nvenc for video output (mp4/mkv/mov).
 - For GIF/image/webp/audio outputs, do NOT use NVENC â€” use the appropriate software encoder from the reference above.
+-If the INPUT is a GIF and the OUTPUT is a Video (MP4/MKV), do NOT use palettegen/paletteuse filters. Instead, use -pix_fmt yuv420p to ensure the video is playable.
 - For GIF outputs, ALWAYS use the single-pass split/palettegen/paletteuse filter_complex pattern shown above.
 - In nvidia mode, use -cq for quality (not -crf). Avoid x264-only presets like veryfast/superfast.
 - If effective encoder family is 'cpu', use libx264 with preset veryfast.
