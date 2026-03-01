@@ -1,70 +1,21 @@
 import os
 import requests
-import shlex
 import datetime
+from pathlib import Path
+from openmedia.constants import (
+    FORBIDDEN_TOKENS,
+    NON_VIDEO_OUTPUT_EXTENSIONS,
+    REDIRECTION_PREFIXES,
+    SHELL_OPERATORS,
+    VIDEO_OUTPUT_EXTENSIONS,
+    tokenize_command,
+)
 from openmedia.state import AgentState
-
-FORBIDDEN_TOKENS = {
-    "rm",
-    "del",
-    "erase",
-    "powershell",
-    "cmd",
-    "bash",
-    "sh",
-    "python",
-    "curl",
-    "wget",
-    "invoke-webrequest",
-}
-SHELL_OPERATORS = {"|", "||", "&&", ";", "&"}
-REDIRECTION_PREFIXES = (">", "<", "1>", "2>", ">>")
-# NOTE: These extension sets and _tokenize_command() are intentionally duplicated
-# from executor.py. The validator (nodes.py) and executor (executor.py) are
-# separate layers — merging them would create a circular import.
-VIDEO_OUTPUT_EXTENSIONS = {
-    ".mp4",
-    ".mkv",
-    ".mov",
-    ".avi",
-    ".webm",
-    ".ts",
-    ".m2ts",
-    ".m4v",
-    ".flv",
-    ".mpeg",
-    ".mpg",
-    ".wmv",
-    ".3gp",
-}
-NON_VIDEO_OUTPUT_EXTENSIONS = {
-    ".gif",
-    ".webp",
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".bmp",
-    ".mp3",
-    ".wav",
-    ".aac",
-    ".flac",
-    ".ogg",
-    ".m4a",
-}
+from openmedia.utils import get_log_path
 
 def _get_executable_name(token):
     cleaned = token.strip("'\"").replace("\\", "/")
     return cleaned.rsplit("/", 1)[-1].lower()
-
-def _tokenize_command(command):
-    tokens = shlex.split(command, posix=False)
-    normalized = []
-    for token in tokens:
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
-            normalized.append(token[1:-1])
-        else:
-            normalized.append(token)
-    return normalized
 
 def _has_unquoted_shell_metacharacters(command):
     in_single = False
@@ -91,6 +42,28 @@ def _infer_output_extension(tokens):
             return ext.lower()
     return ""
 
+def _extract_primary_input(tokens):
+    for idx, token in enumerate(tokens):
+        if token.lower() == "-i" and idx + 1 < len(tokens):
+            return tokens[idx + 1].strip("'\"")
+    return None
+
+def _infer_output_path(tokens):
+    for token in reversed(tokens[1:]):
+        cleaned = token.strip("'\"")
+        if not cleaned or cleaned.startswith("-"):
+            continue
+        return cleaned
+    return None
+
+def _same_path(a, b):
+    try:
+        pa = os.path.normcase(os.path.abspath(str(Path(a).expanduser())))
+        pb = os.path.normcase(os.path.abspath(str(Path(b).expanduser())))
+        return pa == pb
+    except Exception:
+        return False
+
 def _is_palette_file(token):
     cleaned = token.strip("'\"").lower().replace("\\", "/")
     return cleaned.endswith(("/palette.png", "/palette.jpg", "/palette.jpeg", "/palette.bmp", "/palette.webp")) or cleaned in {
@@ -103,7 +76,7 @@ def _is_palette_file(token):
 
 def _log_generation(user_input, command, iteration, status):
     """Logs command generation attempts to generation.log for debugging."""
-    log_file = "generation.log"
+    log_file = get_log_path("generation.log")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     log_entry = (
@@ -238,7 +211,7 @@ ffmpeg -i "INPUT" -vf "scale=1280:-2" -c:v libx264 -preset veryfast -crf 23 -c:a
 - Do not wrap the command in markdown code blocks or backticks.
 - Replace INPUT/OUTPUT placeholders with the actual file paths from the context above.
 - If effective encoder family is 'nvidia', use h264_nvenc or hevc_nvenc for video output (mp4/mkv/mov).
-- For GIF/image/webp/audio outputs, do NOT use NVENC — use the appropriate software encoder from the reference above.
+- For GIF/image/webp/audio outputs, do NOT use NVENC â€” use the appropriate software encoder from the reference above.
 - For GIF outputs, ALWAYS use the single-pass split/palettegen/paletteuse filter_complex pattern shown above.
 - In nvidia mode, use -cq for quality (not -crf). Avoid x264-only presets like veryfast/superfast.
 - If effective encoder family is 'cpu', use libx264 with preset veryfast.
@@ -318,7 +291,7 @@ def validator_node(state: AgentState):
         return state
 
     try:
-        tokens = _tokenize_command(cmd)
+        tokens = tokenize_command(cmd)
     except ValueError as exc:
         state.is_valid = False
         state.error_message = f"Unable to parse command safely: {exc}"
@@ -370,6 +343,15 @@ def validator_node(state: AgentState):
 
     encoder_family = (state.effective_encoder_family or "").lower()
     output_ext = _infer_output_extension(tokens)
+    input_path = _extract_primary_input(tokens)
+    output_path = _infer_output_path(tokens)
+    sink_outputs = {"-", "nul", "/dev/null"}
+    if input_path and output_path and output_path.lower() not in sink_outputs and _same_path(input_path, output_path):
+        state.is_valid = False
+        state.error_message = "Invalid FFmpeg command: input and output paths must be different."
+        _log_validation(state.user_input, cmd, "REJECTED: Input/output path collision")
+        return state
+
     input_count = lowered_tokens.count("-i")
     has_explicit_video_codec = "-c:v" in lowered_tokens or "-vcodec" in lowered_tokens
     is_non_video_output = output_ext in NON_VIDEO_OUTPUT_EXTENSIONS
@@ -452,7 +434,7 @@ def validator_node(state: AgentState):
 
 def _log_validation(user_input, command, result):
     """Logs validation results to generation.log for debugging."""
-    log_file = "generation.log"
+    log_file = get_log_path("generation.log")
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     log_entry = (
@@ -524,3 +506,4 @@ If the command is dangerous, output: REJECTED: [security reason]
         state.error_message = f"Safety Audit unreachable: {exc}"
 
     return state
+

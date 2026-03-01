@@ -1,51 +1,12 @@
 import os
-import shlex
 import subprocess
 from pathlib import Path
+from openmedia.constants import (
+    NON_VIDEO_OUTPUT_EXTENSIONS,
+    VIDEO_OUTPUT_EXTENSIONS,
+    tokenize_command,
+)
 from openmedia.utils import log_command
-
-# NOTE: These extension sets and _tokenize_command() are intentionally duplicated
-# from nodes.py. The validator (nodes.py) and executor (executor.py) are
-# separate layers — merging them would create a circular import.
-VIDEO_OUTPUT_EXTENSIONS = {
-    ".mp4",
-    ".mkv",
-    ".mov",
-    ".avi",
-    ".webm",
-    ".ts",
-    ".m2ts",
-    ".m4v",
-    ".flv",
-    ".mpeg",
-    ".mpg",
-    ".wmv",
-    ".3gp",
-}
-NON_VIDEO_OUTPUT_EXTENSIONS = {
-    ".gif",
-    ".webp",
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".bmp",
-    ".mp3",
-    ".wav",
-    ".aac",
-    ".flac",
-    ".ogg",
-    ".m4a",
-}
-
-def _tokenize_command(command):
-    tokens = shlex.split(command, posix=False)
-    normalized = []
-    for token in tokens:
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}:
-            normalized.append(token[1:-1])
-        else:
-            normalized.append(token)
-    return normalized
 
 def _build_command(tokens):
     return subprocess.list2cmdline(tokens)
@@ -92,7 +53,7 @@ def _strip_quotes(token):
     return token.strip("'\"")
 
 def _same_path(a, b):
-    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
 
 def _default_output_path(target_file):
     base = Path(target_file) if target_file else Path("output.mp4")
@@ -121,6 +82,23 @@ def _extract_primary_input(tokens, target_file):
         if token.lower() == "-i" and idx + 1 < len(tokens):
             return _strip_quotes(tokens[idx + 1])
     return "output.mp4"
+
+def _pin_primary_input(tokens, target_file):
+    """
+    Normalizes the first -i input path to an absolute, deterministic path when
+    target_file is known. This reduces quoting/path issues with LLM output.
+    """
+    if not target_file:
+        return False
+
+    resolved = str(Path(target_file).expanduser().resolve(strict=False))
+    for idx, token in enumerate(tokens):
+        if token.lower() == "-i" and idx + 1 < len(tokens):
+            if _strip_quotes(tokens[idx + 1]) != resolved:
+                tokens[idx + 1] = resolved
+                return True
+            return False
+    return False
 
 def _infer_output_extension(tokens, target_file=None):
     for token in reversed(tokens[1:]):
@@ -190,7 +168,7 @@ def prepare_command_for_safe_execution(
     Returns (prepared_command, changed).
     """
     try:
-        tokens = _tokenize_command(command)
+        tokens = tokenize_command(command)
     except ValueError:
         return command, False
 
@@ -198,6 +176,9 @@ def prepare_command_for_safe_execution(
         return command, False
 
     changed = False
+    if _pin_primary_input(tokens, target_file):
+        changed = True
+
     safe_threads = str(_cap_cpu_threads(ultra_safe))
     output_ext = _infer_output_extension(tokens, target_file)
     is_non_video_target = output_ext in NON_VIDEO_OUTPUT_EXTENSIONS
@@ -283,10 +264,15 @@ def run_ffmpeg(
     )
 
     try:
-        prepared_tokens = _tokenize_command(prepared_command)
+        prepared_tokens = tokenize_command(prepared_command)
         if not prepared_tokens:
             log_command(user_prompt, prepared_command, "FAILED (Empty prepared command)")
             return False, "Prepared command is empty."
+
+        if (encoder_family or "").lower() == "nvidia":
+            # Allow a brief GPU memory handoff window after Ollama unload.
+            import time
+            time.sleep(0.5)
 
         result = subprocess.run(
             prepared_tokens,
@@ -312,3 +298,4 @@ def run_ffmpeg(
         log_command(user_prompt, prepared_command, f"FAILED (Exit Code: {e.returncode})")
         error_text = (e.stderr or e.stdout or str(e)).strip()
         return False, error_text
+
